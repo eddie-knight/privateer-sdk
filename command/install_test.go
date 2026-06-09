@@ -1,212 +1,66 @@
 package command
 
 import (
-	"strings"
 	"testing"
-
-	"github.com/privateerproj/privateer-sdk/internal/registry"
 )
 
-func TestParsePluginName(t *testing.T) {
-	var tests = []struct {
-		name          string
-		input         string
-		expectedOwner string
-		expectedRepo  string
-		expectError   string
+func TestParseCoordinate(t *testing.T) {
+	cases := []struct {
+		name    string
+		arg     string
+		coord   string
+		version string
+		wantErr bool
 	}{
-		{
-			name:          "owner/repo format",
-			input:         "ossf/pvtr-github-repo-scanner",
-			expectedOwner: "ossf",
-			expectedRepo:  "pvtr-github-repo-scanner",
-		},
-		{
-			name:          "repo only defaults to privateerproj",
-			input:         "pvtr-example",
-			expectedOwner: "privateerproj",
-			expectedRepo:  "pvtr-example",
-		},
-		{
-			name:          "org with nested path",
-			input:         "myorg/my-plugin",
-			expectedOwner: "myorg",
-			expectedRepo:  "my-plugin",
-		},
-		{
-			name:        "empty string",
-			input:       "",
-			expectError: "must not be empty",
-		},
-		{
-			name:        "whitespace only",
-			input:       "   ",
-			expectError: "must not be empty",
-		},
-		{
-			name:        "path traversal",
-			input:       "../etc/passwd",
-			expectError: "invalid owner",
-		},
-		{
-			name:        "backslash",
-			input:       "org\\repo",
-			expectError: "invalid repo",
-		},
-		{
-			name:        "empty owner",
-			input:       "/my-plugin",
-			expectError: "invalid owner",
-		},
-		{
-			name:        "empty repo",
-			input:       "myorg/",
-			expectError: "invalid repo",
-		},
-		{
-			name:        "owner starts with dot",
-			input:       ".hidden/repo",
-			expectError: "invalid owner",
-		},
-		{
-			name:        "repo starts with hyphen",
-			input:       "org/-repo",
-			expectError: "invalid repo",
-		},
+		{"ns/id latest", "ossf/pvtr-github-repo", "ossf/pvtr-github-repo", "", false},
+		{"ns/id pinned", "ossf/pvtr-github-repo@1.4.0", "ossf/pvtr-github-repo", "1.4.0", false},
+		{"surrounding space trimmed", "  finos-ccc/ccc-evaluator @ 2.1.0 ", "finos-ccc/ccc-evaluator", "2.1.0", false},
+		{"internal space in id rejected", "ns/bad id@1.0", "", "", true},
+		{"finos pin", "finos-ccc/ccc-evaluator@2.1.0", "finos-ccc/ccc-evaluator", "2.1.0", false},
+		// grc.store has NO default namespace — a bare name is a clear error, not
+		// a silently-defaulted "privateerproj/<name>" (the reversed Phase-B break).
+		{"bare name rejected", "pvtr-github-repo", "", "", true},
+		{"empty", "", "", "", true},
+		{"empty namespace", "/id", "", "", true},
+		{"empty id", "ns/", "", "", true},
 	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			owner, repo, err := parsePluginName(tt.input)
-
-			if tt.expectError != "" {
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			coord, version, err := parseCoordinate(c.arg)
+			if c.wantErr {
 				if err == nil {
-					t.Fatalf("expected error containing %q, got nil", tt.expectError)
-				}
-				if !strings.Contains(err.Error(), tt.expectError) {
-					t.Errorf("expected error containing %q, got: %v", tt.expectError, err)
+					t.Errorf("expected error for %q, got coord=%q version=%q", c.arg, coord, version)
 				}
 				return
 			}
 			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
+				t.Fatalf("unexpected error for %q: %v", c.arg, err)
 			}
-			if owner != tt.expectedOwner {
-				t.Errorf("owner: got %q, expected %q", owner, tt.expectedOwner)
-			}
-			if repo != tt.expectedRepo {
-				t.Errorf("repo: got %q, expected %q", repo, tt.expectedRepo)
+			if coord != c.coord || version != c.version {
+				t.Errorf("parseCoordinate(%q) = (%q, %q), want (%q, %q)", c.arg, coord, version, c.coord, c.version)
 			}
 		})
 	}
 }
 
-func TestIsVetted(t *testing.T) {
-	plugins := []string{"ossf/pvtr-github-repo-scanner", "privateerproj/pvtr-example", " spaced-name "}
-
-	var tests = []struct {
-		name     string
-		search   string
-		expected bool
-	}{
-		{name: "exact match", search: "ossf/pvtr-github-repo-scanner", expected: true},
-		{name: "another match", search: "privateerproj/pvtr-example", expected: true},
-		{name: "not in list", search: "unknown/plugin", expected: false},
-		{name: "empty string", search: "", expected: false},
-		{name: "trimmed match", search: "spaced-name", expected: true},
+func TestParseCoordinate_BareNameMessageIsActionable(t *testing.T) {
+	// The bare-name error must point the user at the right form.
+	_, _, err := parseCoordinate("pvtr-github-repo")
+	if err == nil {
+		t.Fatal("expected error")
 	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := isVetted(plugins, tt.search)
-			if got != tt.expected {
-				t.Errorf("isVetted(plugins, %q) = %v, expected %v", tt.search, got, tt.expected)
-			}
-		})
+	if got := err.Error(); !contains(got, "<namespace>/<plugin_id>") {
+		t.Errorf("bare-name error should show the coordinate form, got: %q", got)
 	}
 }
 
-func TestResolveDownloadURL(t *testing.T) {
-	var tests = []struct {
-		name        string
-		data        *registry.PluginData
-		expectURL   string
-		expectError string
-	}{
-		{
-			name: "direct download URL",
-			data: &registry.PluginData{
-				Name:     "ossf/pvtr-github-repo-scanner",
-				Download: "https://example.com/direct-download.tar.gz",
-				Source:   "https://github.com/ossf/pvtr-github-repo-scanner",
-				Latest:   "0.19.2",
-			},
-			expectURL: "https://example.com/direct-download.tar.gz",
-		},
-		{
-			name: "inferred from GitHub release",
-			data: &registry.PluginData{
-				Name:   "ossf/pvtr-github-repo-scanner",
-				Source: "https://github.com/ossf/pvtr-github-repo-scanner",
-				Latest: "0.19.2",
-			},
-			expectURL: "https://github.com/ossf/pvtr-github-repo-scanner/releases/download/v0.19.2/pvtr-github-repo-scanner_",
-		},
-		{
-			name: "inferred from owner/repo source",
-			data: &registry.PluginData{
-				Name:   "privateerproj/pvtr-example",
-				Source: "privateerproj/pvtr-example",
-				Latest: "1.0.0",
-			},
-			expectURL: "https://github.com/privateerproj/pvtr-example/releases/download/v1.0.0/pvtr-example_",
-		},
-		{
-			name: "missing source and download",
-			data: &registry.PluginData{
-				Name:   "broken-plugin",
-				Latest: "1.0.0",
-			},
-			expectError: "no download URL and no source/version",
-		},
-		{
-			name: "missing version",
-			data: &registry.PluginData{
-				Name:   "broken-plugin",
-				Source: "https://github.com/org/repo",
-			},
-			expectError: "no download URL and no source/version",
-		},
+func contains(s, sub string) bool {
+	for i := 0; i+len(sub) <= len(s); i++ {
+		if s[i:i+len(sub)] == sub {
+			return true
+		}
 	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got, err := resolveDownloadURL(tt.data)
-
-			if tt.expectError != "" {
-				if err == nil {
-					t.Fatalf("expected error containing %q, got nil", tt.expectError)
-				}
-				if !strings.Contains(err.Error(), tt.expectError) {
-					t.Errorf("expected error containing %q, got: %v", tt.expectError, err)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			// For inferred URLs, we only check the prefix since the suffix depends on OS/arch
-			if tt.data.Download != "" {
-				if got != tt.expectURL {
-					t.Errorf("got %q, expected %q", got, tt.expectURL)
-				}
-			} else {
-				if !strings.HasPrefix(got, tt.expectURL) {
-					t.Errorf("got %q, expected prefix %q", got, tt.expectURL)
-				}
-			}
-		})
-	}
+	return false
 }
 
 func TestContains(t *testing.T) {

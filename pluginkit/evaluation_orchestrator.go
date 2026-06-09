@@ -18,10 +18,16 @@ import (
 
 // EvaluationOrchestrator gets the plugin in position to execute the specified evaluation suites.
 type EvaluationOrchestrator struct {
-	ServiceName       string             `json:"service-name" yaml:"service-name"`
-	PluginName        string             `json:"plugin-name" yaml:"plugin-name"`
-	PluginUri         string             `json:"plugin-uri" yaml:"plugin-uri"`
-	PluginVersion     string             `json:"plugin-version" yaml:"plugin-version"`
+	ServiceName   string `json:"service-name" yaml:"service-name"`
+	PluginName    string `json:"plugin-name" yaml:"plugin-name"`
+	PluginUri     string `json:"plugin-uri" yaml:"plugin-uri"`
+	PluginVersion string `json:"plugin-version" yaml:"plugin-version"`
+	// Publisher is the grc.store author/org id that owns this plugin (and, by
+	// convention, the catalogs it evaluates). With PluginName it forms the publish
+	// coordinate <Publisher>/<PluginName>, and it is the namespace of every
+	// evaluated catalog in the publish manifest. Inert at run time; required only
+	// to publish (a plugin runs without it, but cannot be published without it).
+	Publisher         string             `json:"publisher,omitempty" yaml:"publisher,omitempty"`
 	Payload           any                `json:"payload,omitempty" yaml:"payload,omitempty"`
 	Evaluation_Suites []*EvaluationSuite `json:"evaluation-suites" yaml:"evaluation-suites"` // EvaluationSuite is a map of evaluations to their catalog names
 

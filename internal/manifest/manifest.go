@@ -11,10 +11,27 @@ import (
 const filename = "plugins.json"
 
 // Plugin represents an installed plugin entry in the manifest.
+//
+// The first three fields (Name, Version, BinaryPath) are the original schema.
+// Coordinate, IndexDigest, and SignerIdentity were added for grc.store-sourced
+// installs (signed OCI indexes); they are omitempty so manifests written by the
+// GitHub-Releases path stay byte-identical to the old format, and so entries
+// written before this migration load back with these fields zero-valued.
 type Plugin struct {
 	Name       string `json:"name"`       // full owner/repo form, e.g. "ossf/pvtr-github-repo-scanner"
 	Version    string `json:"version"`    // version installed from registry
 	BinaryPath string `json:"binaryPath"` // filename relative to binaries-path
+
+	// Coordinate is the grc.store plugin coordinate "<namespace>/<plugin_id>"
+	// the binary was pulled from. Empty for GitHub-Releases-sourced plugins.
+	Coordinate string `json:"coordinate,omitempty"`
+	// IndexDigest is the verified OCI image-index digest (sha256:...) the
+	// install was resolved from, recorded for update/re-verify drift detection.
+	IndexDigest string `json:"indexDigest,omitempty"`
+	// SignerIdentity is the normalized keyless signer identity
+	// ("keyless:<issuer>#<workflow-path>") pinned on first install and enforced
+	// on update (client-side TOFU). Empty for GitHub-Releases-sourced plugins.
+	SignerIdentity string `json:"signerIdentity,omitempty"`
 }
 
 // Manifest tracks installed plugins.

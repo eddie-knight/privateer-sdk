@@ -1,10 +1,68 @@
 package manifest
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"testing"
 )
+
+// TestLoad_PreMigrationFixture is the named migration deliverable: it loads a
+// committed manifest written BEFORE the Coordinate/IndexDigest/SignerIdentity
+// fields existed (testdata/pre-migration/plugins.json — a frozen artifact of
+// the old 3-field schema) and asserts the old entries still load intact with
+// the three new fields zero-valued. This pins the "old manifests keep loading"
+// contract so a future change that tightens the struct (e.g. required-field
+// validation) can't silently break reading manifests already on users' disks.
+func TestLoad_PreMigrationFixture(t *testing.T) {
+	m, err := Load(filepath.Join("testdata", "pre-migration"))
+	if err != nil {
+		t.Fatalf("loading pre-migration fixture: %v", err)
+	}
+	if len(m.Plugins) != 2 {
+		t.Fatalf("expected 2 plugins from fixture, got %d", len(m.Plugins))
+	}
+
+	got := m.Plugins[0]
+	if got.Name != "ossf/pvtr-github-repo-scanner" || got.Version != "1.4.0" || got.BinaryPath != "github-repo" {
+		t.Errorf("original fields not preserved: %+v", got)
+	}
+	// The three migration fields must be zero-valued for old entries.
+	for _, p := range m.Plugins {
+		if p.Coordinate != "" {
+			t.Errorf("%s: expected empty Coordinate, got %q", p.Name, p.Coordinate)
+		}
+		if p.IndexDigest != "" {
+			t.Errorf("%s: expected empty IndexDigest, got %q", p.Name, p.IndexDigest)
+		}
+		if p.SignerIdentity != "" {
+			t.Errorf("%s: expected empty SignerIdentity, got %q", p.Name, p.SignerIdentity)
+		}
+	}
+}
+
+// TestSave_OmitsEmptyMigrationFields guards the omitempty contract: re-saving a
+// plugin that carries no grc.store provenance must not inject coordinate/
+// indexDigest/signerIdentity keys, so GitHub-Releases-sourced manifests stay
+// byte-compatible with the pre-migration format.
+func TestSave_OmitsEmptyMigrationFields(t *testing.T) {
+	dir := t.TempDir()
+	m := &Manifest{Plugins: []Plugin{
+		{Name: "ossf/pvtr-github-repo-scanner", Version: "1.4.0", BinaryPath: "github-repo"},
+	}}
+	if err := m.Save(dir); err != nil {
+		t.Fatalf("Save error: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, filename))
+	if err != nil {
+		t.Fatalf("reading saved manifest: %v", err)
+	}
+	for _, key := range [][]byte{[]byte("coordinate"), []byte("indexDigest"), []byte("signerIdentity")} {
+		if bytes.Contains(data, key) {
+			t.Errorf("saved manifest unexpectedly contains %q key:\n%s", key, data)
+		}
+	}
+}
 
 func TestLoad_MissingFile(t *testing.T) {
 	m, err := Load(t.TempDir())

@@ -1,6 +1,7 @@
 package command
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"log"
@@ -9,7 +10,7 @@ import (
 
 	"github.com/privateerproj/privateer-sdk/config"
 	"github.com/privateerproj/privateer-sdk/internal/manifest"
-	"github.com/privateerproj/privateer-sdk/internal/registry"
+	"github.com/privateerproj/privateer-sdk/internal/oci"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -52,16 +53,16 @@ func SetListCmdFlags(cmd *cobra.Command) {
 	cmd.PersistentFlags().Bool("installed", false, "List only plugins that are installed locally")
 	_ = viper.BindPFlag("installed", cmd.PersistentFlags().Lookup("installed"))
 
-	cmd.PersistentFlags().Bool("installable", false, "List vetted plugins from the registry that are available to install")
+	cmd.PersistentFlags().Bool("installable", false, "List plugins published to grc.store that are available to install")
 	_ = viper.BindPFlag("installable", cmd.PersistentFlags().Lookup("installable"))
 
 	cmd.MarkFlagsMutuallyExclusive("all", "installed", "installable")
 }
 
 func writeInstallablePlugins(writer Writer) {
-	remote, err := fetchVettedPlugins()
+	remote, err := fetchInstallablePlugins()
 	if err != nil {
-		_, _ = fmt.Fprintf(writer, "Error loading vetted plugins: %v\n", err)
+		_, _ = fmt.Fprintf(writer, "Error loading installable plugins: %v\n", err)
 		return
 	}
 	local := getLocalPlugins()
@@ -149,29 +150,28 @@ func GetPlugins() []*PluginPkg {
 	return output
 }
 
-// fetchVettedPlugins returns vetted plugin names from the registry.
-func fetchVettedPlugins() ([]*PluginPkg, error) {
-	client := registry.NewClient()
-	resp, err := client.GetVettedList()
+// fetchInstallablePlugins lists plugins published to grc.store (the hub's
+// anonymous /v1/plugins directory), keyed by their <namespace>/<plugin_id>
+// coordinate. This replaced the vetted-list endpoint: it is DISCOVERY, not
+// curation — install-time trust is the §6 signature verification, not presence
+// in this list.
+func fetchInstallablePlugins() ([]*PluginPkg, error) {
+	items, err := oci.NewClient().Browse(context.Background())
 	if err != nil {
-		return nil, fmt.Errorf("fetching vetted plugins: %w", err)
-	}
-	if len(resp.Plugins) == 0 {
-		return nil, fmt.Errorf("response has no plugins array or it is empty")
+		return nil, fmt.Errorf("browsing grc.store plugins: %w", err)
 	}
 	var out []*PluginPkg
-	for _, name := range resp.Plugins {
-		name = strings.TrimSpace(name)
-		if name != "" {
+	for _, it := range items {
+		if name := strings.TrimSpace(it.Coordinate()); name != "/" && name != "" {
 			out = append(out, &PluginPkg{Name: name})
 		}
 	}
 	return out, nil
 }
 
-// appendRemotePlugins appends vetted registry plugins not already in the slice.
+// appendRemotePlugins appends grc.store-installable plugins not already in the slice.
 func appendRemotePlugins(plugins []*PluginPkg) []*PluginPkg {
-	remote, err := fetchVettedPlugins()
+	remote, err := fetchInstallablePlugins()
 	if err != nil {
 		log.Printf("Warning: could not fetch remote plugin list: %v", err)
 		return plugins

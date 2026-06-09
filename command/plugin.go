@@ -1,6 +1,7 @@
 package command
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"text/tabwriter"
@@ -10,6 +11,12 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
+
+// PublishManifestCommand is the plugin subcommand that emits the grc.store
+// publish manifest as JSON. `pvtr publish` invokes it on the built binary to
+// learn the plugin's coordinate and evaluated catalogs, rather than asking the
+// publisher to repeat that data as flags.
+const PublishManifestCommand = "publish-manifest"
 
 // Plugin represents a Privateer plugin instance.
 type Plugin struct{}
@@ -31,6 +38,8 @@ func NewPluginCommands(pluginName, buildVersion, buildGitCommitHash, buildTime s
 	runCmd := runCommand(pluginName)
 
 	runCmd.AddCommand(debugCommand())
+
+	runCmd.AddCommand(publishManifestCommand())
 
 	runCmd.AddCommand(
 		versionCommand(buildVersion, buildGitCommitHash, buildTime))
@@ -68,6 +77,36 @@ func debugCommand() *cobra.Command {
 			if err != nil {
 				cmd.Println(err)
 			}
+		},
+	}
+}
+
+// publishManifestCommand emits the plugin's grc.store publish manifest
+// (coordinate + evaluated catalogs) as JSON on stdout. It reads from the active
+// orchestrator, which the plugin author populated at construction time — so it
+// works without config or mobilization, the same way `version` does. `pvtr
+// publish` execs this on the built binary and parses stdout.
+func publishManifestCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   PublishManifestCommand,
+		Short: "Emit the grc.store publish manifest (coordinate + evaluated catalogs) as JSON.",
+		Long: "Print the machine-readable manifest `pvtr publish` consumes: the plugin's " +
+			"grc.store coordinate and the control catalogs it evaluates. Fails if the plugin " +
+			"author has not set orchestrator.Publisher.",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if ActiveEvaluationOrchestrator == nil {
+				return fmt.Errorf("no active evaluation orchestrator")
+			}
+			m, err := ActiveEvaluationOrchestrator.PublishManifest()
+			if err != nil {
+				return err
+			}
+			b, err := json.MarshalIndent(m, "", "  ")
+			if err != nil {
+				return fmt.Errorf("encoding publish manifest: %w", err)
+			}
+			_, err = cmd.OutOrStdout().Write(append(b, '\n'))
+			return err
 		},
 	}
 }
