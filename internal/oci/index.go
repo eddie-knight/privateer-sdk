@@ -11,6 +11,7 @@ import (
 	"github.com/opencontainers/go-digest"
 	specs "github.com/opencontainers/image-spec/specs-go"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
+	"github.com/privateerproj/privateer-sdk/pluginkit"
 )
 
 // grc.store plugin media types (ADR-0034 / installer recommendation §3).
@@ -46,13 +47,10 @@ type PluginPlatform struct {
 	Arch string `json:"arch"`
 }
 
-// EvaluatesEntry is one control-catalog linkage in the SIGNED config-blob shape
-// (single "catalog: <ns>/<id>" field — NOT the hub API's split shape).
-type EvaluatesEntry struct {
-	Catalog        string   `json:"catalog"`         // "<namespace>/<catalog_id>"
-	CatalogVersion string   `json:"catalog_version"` //nolint:tagliatelle // wire contract
-	RequirementIDs []string `json:"requirement_ids"` //nolint:tagliatelle // wire contract
-}
+// EvaluatesEntry is the config blob's evaluates entry. It IS the plugin-
+// declared pluginkit.EvaluatesDeclaration — a true alias, so the signed wire
+// shape and the publish-manifest shape cannot drift.
+type EvaluatesEntry = pluginkit.EvaluatesDeclaration
 
 // blob is an assembled, content-addressed in-memory artifact: its bytes, media
 // type, and digest. The push layer (oras) writes these to a registry; keeping
@@ -143,14 +141,22 @@ func AssembleIndex(p AssembleParams) (*AssembledIndex, error) {
 
 	out := &AssembledIndex{Coordinate: p.Coordinate, Version: p.Version}
 	blobsByDigest := map[digest.Digest]bool{}
+	// binBlobsByPath memoizes binary reads: the darwin universal fat binary is
+	// referenced by two PlatformBinary entries (amd64 + arm64) with the same
+	// Path — memoizing avoids reading and SHA-256ing the same file twice.
+	binBlobsByPath := map[string]blob{}
 	var manifestDescriptors []ocispec.Descriptor
 
 	for _, b := range p.Binaries {
-		binData, err := os.ReadFile(b.Path)
-		if err != nil {
-			return nil, fmt.Errorf("reading binary for %s/%s at %s: %w", b.OS, b.Arch, b.Path, err)
+		binBlob, ok := binBlobsByPath[b.Path]
+		if !ok {
+			binData, err := os.ReadFile(b.Path)
+			if err != nil {
+				return nil, fmt.Errorf("reading binary for %s/%s at %s: %w", b.OS, b.Arch, b.Path, err)
+			}
+			binBlob = newBlob(MediaTypePluginBinary, binData)
+			binBlobsByPath[b.Path] = binBlob
 		}
-		binBlob := newBlob(MediaTypePluginBinary, binData)
 
 		cfg := PluginConfig{
 			Plugin:     p.Plugin,

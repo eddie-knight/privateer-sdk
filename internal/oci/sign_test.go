@@ -47,13 +47,14 @@ func TestAttachSignature_RoundTripsThroughDiscovery(t *testing.T) {
 		t.Fatalf("AttachSignature: %v", err)
 	}
 
-	// fetchSignatureBundle (the consumer's discovery) must find exactly these bytes.
-	got, err := fetchSignatureBundle(ctx, store, idx.Index.descriptor())
+	// fetchSignatureBundle (the consumer's discovery) must find exactly these bytes
+	// as the sole element of the returned slice.
+	got, _, err := fetchSignatureBundle(ctx, store, idx.Index.descriptor())
 	if err != nil {
 		t.Fatalf("fetchSignatureBundle: %v", err)
 	}
-	if string(got) != string(bundleJSON) {
-		t.Errorf("round-trip mismatch:\n got %s\nwant %s", got, bundleJSON)
+	if len(got) != 1 || string(got[0]) != string(bundleJSON) {
+		t.Errorf("round-trip mismatch:\n got %v\nwant [%s]", got, bundleJSON)
 	}
 }
 
@@ -64,15 +65,15 @@ func TestAttachSignature_UnsignedBeforeAttach(t *testing.T) {
 	ctx := context.Background()
 	idx, store := assembleTiny(t)
 
-	if got, err := fetchSignatureBundle(ctx, store, idx.Index.descriptor()); err != nil || got != nil {
-		t.Fatalf("expected no bundle before attach, got %q err %v", got, err)
+	if got, _, err := fetchSignatureBundle(ctx, store, idx.Index.descriptor()); err != nil || len(got) != 0 {
+		t.Fatalf("expected no bundle before attach, got %v err %v", got, err)
 	}
 	if err := AttachSignature(ctx, store, idx.Index.descriptor(), &SignedBundle{JSON: []byte(`{"x":1}`)}); err != nil {
 		t.Fatal(err)
 	}
-	got, err := fetchSignatureBundle(ctx, store, idx.Index.descriptor())
-	if err != nil || got == nil {
-		t.Fatalf("expected a bundle after attach, got %q err %v", got, err)
+	got, _, err := fetchSignatureBundle(ctx, store, idx.Index.descriptor())
+	if err != nil || len(got) == 0 {
+		t.Fatalf("expected a bundle after attach, got %v err %v", got, err)
 	}
 }
 

@@ -135,3 +135,20 @@ func StringSliceContains(arr []string, val string) bool {
 	}
 	return false
 }
+
+// WriteFileAtomic writes data to path via a same-directory temp file + rename
+// so a crash mid-write can never leave a partial file at path. The temp file
+// is removed on rename failure. This is the right tool for any file that must
+// be exec-safe or digest-stable (plugin binaries, manifests). It is NOT used
+// for credential stores — see internal/auth/store.go for why that differs.
+func WriteFileAtomic(path string, data []byte, perm os.FileMode) error {
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, perm); err != nil {
+		return fmt.Errorf("writing %s: %w", tmp, err)
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		return fmt.Errorf("renaming %s to %s: %w", tmp, path, err)
+	}
+	return nil
+}

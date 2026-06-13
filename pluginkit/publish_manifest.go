@@ -7,13 +7,13 @@ import (
 )
 
 // PublishManifest is the machine-readable descriptor `pvtr publish` reads from a
-// built plugin (via the publish-manifest subcommand) in place of CLI flags. It
-// is derived entirely from data the plugin already carries: the coordinate from
-// Publisher + PluginName, and the catalog linkage from the embedded reference
-// catalogs (their ids, versions, and control ids), all under the Publisher
-// namespace. The only author-asserted input is Publisher, which lives in the
-// plugin's source — so nothing here is a publish-time value a non-owner could
-// forge.
+// built plugin (via the publish-manifest subcommand) in place of CLI flags. The
+// plugin coordinate is Publisher + PluginName. Each evaluated catalog's
+// coordinate is the catalog's OWN owner — metadata.author.id — plus its id, so a
+// plugin that evaluates someone else's catalog links to the real owner instead
+// of falsely claiming it under the plugin's own namespace. A CatalogNamespaces
+// override is available for the rare case where a catalog's author.id does not
+// match the namespace it is published under on grc.store.
 type PublishManifest struct {
 	// Coordinate is the plugin's grc.store coordinate "<publisher>/<plugin_id>".
 	Coordinate string `json:"coordinate"`
@@ -32,12 +32,15 @@ type EvaluatesDeclaration struct {
 
 // PublishManifest assembles the publish descriptor from the orchestrator's
 // Publisher + PluginName and its embedded reference catalogs: the coordinate is
-// <Publisher>/<PluginName>, and each evaluated catalog is namespaced under
-// Publisher with its id/version/control-ids read from the catalog itself. It
-// fails closed (no manifest) when Publisher or PluginName is unset, when no
-// catalogs are loaded, or when a catalog has no version or controls — every case
-// is a "this plugin cannot be published yet" error the author fixes in code. A
-// plugin RUNS without a Publisher; it cannot be PUBLISHED without one.
+// <Publisher>/<PluginName>, and each evaluated catalog is namespaced under its
+// own owner (metadata.author.id), with id/version/control-ids read from the
+// catalog itself. It fails closed (no manifest) when Publisher or PluginName is
+// unset, when no catalogs are loaded, when a catalog has no version or controls,
+// or when a catalog has no author id and no CatalogNamespaces override (we will
+// not synthesize an owner — claiming an unattributed catalog under any namespace
+// is a false claim). Every case is a "this plugin cannot be published yet" error
+// the author fixes in code or catalog metadata. A plugin RUNS without these; it
+// cannot be PUBLISHED without them.
 func (v *EvaluationOrchestrator) PublishManifest() (PublishManifest, error) {
 	publisher := strings.TrimSpace(v.Publisher)
 	if publisher == "" {
@@ -61,9 +64,10 @@ func (v *EvaluationOrchestrator) PublishManifest() (PublishManifest, error) {
 			return PublishManifest{}, fmt.Errorf("evaluated catalog %q has no metadata.version", id)
 		}
 
-		// Requirement ids are the catalog's control ids. Deduplicated because a
-		// catalog that imports another has those controls appended to Controls by
-		// addEvaluationSuite, which can repeat an id.
+		// Requirement ids are the catalog's OWN control ids. Deduplicated as cheap
+		// hardening against any future source of duplicate ids. addEvaluationSuite
+		// no longer mutates the shared catalog (copy-on-import), so referenceCatalogs
+		// entries always contain only the catalog's own controls here.
 		seen := map[string]bool{}
 		reqs := make([]string, 0, len(catalog.Controls))
 		for _, c := range catalog.Controls {
@@ -77,8 +81,30 @@ func (v *EvaluationOrchestrator) PublishManifest() (PublishManifest, error) {
 		}
 		sort.Strings(reqs)
 
+		// Resolve the catalog's owning namespace for an ACCURATE cross-link. The
+		// catalog itself is the source of truth via metadata.author.id; an explicit
+		// CatalogNamespaces override wins for the rare case where author.id doesn't
+		// match the namespace the catalog is published under on grc.store. We never
+		// fall back to the plugin's own Publisher — claiming a catalog we don't own
+		// under our namespace is a false attribution. Fail closed if neither yields
+		// a namespace, rather than synthesizing one.
+		ns := strings.TrimSpace(catalog.Metadata.Author.Id)
+		if override, ok := v.CatalogNamespaces[id]; ok {
+			override = strings.TrimSpace(override)
+			if override == "" || strings.Contains(override, "/") {
+				return PublishManifest{}, fmt.Errorf("CatalogNamespaces[%q] = %q is not a valid namespace", id, override)
+			}
+			ns = override
+		}
+		if ns == "" {
+			return PublishManifest{}, fmt.Errorf("evaluated catalog %q has no metadata.author.id and no CatalogNamespaces override; cannot determine its owning grc.store namespace (set the catalog's author id, or map it in CatalogNamespaces)", id)
+		}
+		if strings.Contains(ns, "/") {
+			return PublishManifest{}, fmt.Errorf("catalog %q owner namespace %q (from metadata.author.id) must not contain '/'", id, ns)
+		}
+
 		evals = append(evals, EvaluatesDeclaration{
-			Catalog:        publisher + "/" + id,
+			Catalog:        ns + "/" + id,
 			CatalogVersion: version,
 			RequirementIDs: reqs,
 		})

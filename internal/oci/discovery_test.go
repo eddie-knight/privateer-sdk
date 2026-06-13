@@ -125,3 +125,53 @@ func TestDiscover_Non200FailsClosed(t *testing.T) {
 		t.Fatal("expected error for non-200 discovery response, got nil")
 	}
 }
+
+func TestPlainHTTP(t *testing.T) {
+	tests := []struct {
+		name        string
+		registryURL string
+		want        bool
+	}{
+		{"https scheme", "https://oci.grc.store", false},
+		{"http scheme (local dev)", "http://localhost:5050", true},
+		{"http with trailing slash", "http://localhost:5050/", true},
+		{"https with port", "https://oci.grc.store:443", false},
+		{"bare host (no scheme) implies https", "localhost:5050", false},
+		{"http with whitespace", "  http://localhost:5050  ", true},
+		{"https with whitespace", "  https://oci.grc.store  ", false},
+		// empty registry_url: parseRegistryURL errors → false (fail-safe)
+		{"empty registry_url", "", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			d := &Discovery{RegistryURL: tt.registryURL}
+			if got := d.PlainHTTP(); got != tt.want {
+				t.Errorf("PlainHTTP(%q) = %v, want %v", tt.registryURL, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestRegistryHost_ConsistentWithPlainHTTP verifies that RegistryHost and
+// PlainHTTP derive from the same parse (parseRegistryURL) so their answers
+// can never contradict each other for the same registry_url value.
+func TestRegistryHost_ConsistentWithPlainHTTP(t *testing.T) {
+	cases := []string{
+		"http://localhost:5050",
+		"https://oci.grc.store",
+		"http://localhost:5050/",
+		"oci.grc.store",
+	}
+	for _, raw := range cases {
+		d := &Discovery{RegistryURL: raw}
+		host, err := d.RegistryHost()
+		if err != nil {
+			t.Fatalf("RegistryHost(%q) unexpected error: %v", raw, err)
+		}
+		if host == "" {
+			t.Errorf("RegistryHost(%q) returned empty string", raw)
+		}
+		// PlainHTTP must not error for valid URLs — it returns bool only.
+		_ = d.PlainHTTP()
+	}
+}

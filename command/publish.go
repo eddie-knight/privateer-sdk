@@ -129,7 +129,7 @@ func runPublish(ctx context.Context, writer Writer, p publishParams) error {
 		Plugin:     coordinate,
 		Version:    version,
 		Binaries:   bins,
-		Evaluates:  evaluatesFromManifest(manifest),
+		Evaluates:  manifest.Evaluates,
 	}
 
 	// A --registry override pushes to a non-hub host for testing; it requires an
@@ -207,7 +207,7 @@ func runPublish(ctx context.Context, writer Writer, p publishParams) error {
 
 	pushOpts := oci.PushOptions{
 		RegistryHost:  host2,
-		PlainHTTP:     strings.HasPrefix(disco.RegistryURL, "http://"),
+		PlainHTTP:     disco.PlainHTTP(),
 		RegistryToken: regToken.Token,
 	}
 
@@ -282,20 +282,6 @@ func execPublishManifest(ctx context.Context, bins []oci.PlatformBinary) (plugin
 		return zero, fmt.Errorf("decoding publish manifest JSON: %w", err)
 	}
 	return m, nil
-}
-
-// evaluatesFromManifest maps the plugin's manifest evaluates into the OCI
-// assembler's shape (the two structs are intentionally field-identical).
-func evaluatesFromManifest(m pluginkit.PublishManifest) []oci.EvaluatesEntry {
-	out := make([]oci.EvaluatesEntry, 0, len(m.Evaluates))
-	for _, e := range m.Evaluates {
-		out = append(out, oci.EvaluatesEntry{
-			Catalog:        e.Catalog,
-			CatalogVersion: e.CatalogVersion,
-			RequirementIDs: e.RequirementIDs,
-		})
-	}
-	return out
 }
 
 // parseRegistryOverride splits a --registry value that MUST carry a scheme into

@@ -9,6 +9,7 @@ import (
 
 	"github.com/privateerproj/privateer-sdk/config"
 	"github.com/privateerproj/privateer-sdk/internal/manifest"
+	"github.com/privateerproj/privateer-sdk/utils"
 	"github.com/spf13/cobra"
 )
 
@@ -70,7 +71,9 @@ func installLocal(writer Writer, binaryPath string) error {
 		return fmt.Errorf("reading %s: %w", binaryPath, err)
 	}
 	destPath := filepath.Join(destDir, binaryName)
-	if err := os.WriteFile(destPath, src, 0755); err != nil {
+	// Use atomic write (temp + rename) so a crash mid-copy can't leave a partial
+	// binary that go-plugin would exec — same hazard as the grcstore install path.
+	if err := utils.WriteFileAtomic(destPath, src, 0755); err != nil {
 		return fmt.Errorf("writing %s: %w", destPath, err)
 	}
 

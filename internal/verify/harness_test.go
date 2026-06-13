@@ -33,7 +33,7 @@ const (
 // carry no embedded SCT (production passes 1, mirroring the hub's tests).
 func testVerifier(t *testing.T, vs *ca.VirtualSigstore) *Verifier {
 	t.Helper()
-	v, err := newVerifier(vs, 5*time.Second, 0)
+	v, err := newVerifier(vs, 0)
 	if err != nil {
 		t.Fatalf("newVerifier: %v", err)
 	}
@@ -109,9 +109,20 @@ func assembleAndPush(t *testing.T, bins []oci.PlatformBinary) *builtIndex {
 }
 
 // fetched builds an oci.FetchedIndex over the built index's store with the given
-// (possibly nil) signature bundle bytes.
+// (possibly nil) signature bundle bytes. A single bundle is wrapped in a slice;
+// nil means unsigned (no bundles).
 func (b *builtIndex) fetched(bundleJSON []byte) *oci.FetchedIndex {
-	return oci.NewFetchedIndex(b.coord, b.version, b.idxDesc, b.idxBytes, bundleJSON, b.store)
+	var bundles [][]byte
+	if bundleJSON != nil {
+		bundles = [][]byte{bundleJSON}
+	}
+	return oci.NewFetchedIndex(b.coord, b.version, b.idxDesc, b.idxBytes, bundles, b.store)
+}
+
+// fetchedMulti builds an oci.FetchedIndex with multiple signature bundles,
+// for testing the multi-bundle selection logic.
+func (b *builtIndex) fetchedMulti(bundleJSONs [][]byte) *oci.FetchedIndex {
+	return oci.NewFetchedIndex(b.coord, b.version, b.idxDesc, b.idxBytes, bundleJSONs, b.store)
 }
 
 // signEntity signs the built index's bytes (whose sha256 IS the index digest)

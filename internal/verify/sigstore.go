@@ -14,7 +14,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/privateerproj/privateer-sdk/internal/oci"
 	"github.com/sigstore/sigstore-go/pkg/bundle"
@@ -31,9 +30,6 @@ import (
 //
 //go:embed trusted_root.json
 var embeddedTrustedRoot []byte
-
-// defaultVerifyTimeout bounds the offline, CPU-only signature verification.
-const defaultVerifyTimeout = 15 * time.Second
 
 // Named fail-closed errors. Every one ABORTS the install and is surfaced with
 // the signer identity (when known) and coordinate by the caller.
@@ -63,7 +59,6 @@ var (
 // root. It is constructed once (parsing the root is non-trivial) and reused.
 type Verifier struct {
 	verifier *sgverify.Verifier
-	timeout  time.Duration
 }
 
 // NewVerifier builds a Verifier over the embedded public-good trusted root with
@@ -76,13 +71,13 @@ func NewVerifier() (*Verifier, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%w: parse embedded trusted root: %v", ErrTrustRoot, err)
 	}
-	return newVerifier(tm, defaultVerifyTimeout, 1)
+	return newVerifier(tm, 1)
 }
 
 // newVerifier is the test-friendly constructor: it takes any TrustedMaterial
 // (so unit tests pass a VirtualSigstore) and an SCT threshold (tests pass 0 —
 // VirtualSigstore certs carry no embedded SCT; production passes 1).
-func newVerifier(tm root.TrustedMaterial, timeout time.Duration, sctThreshold int) (*Verifier, error) {
+func newVerifier(tm root.TrustedMaterial, sctThreshold int) (*Verifier, error) {
 	opts := []sgverify.VerifierOption{
 		sgverify.WithTransparencyLog(1),
 		sgverify.WithObserverTimestamps(1),
@@ -94,10 +89,7 @@ func newVerifier(tm root.TrustedMaterial, timeout time.Duration, sctThreshold in
 	if err != nil {
 		return nil, fmt.Errorf("%w: build verifier: %v", ErrTrustRoot, err)
 	}
-	if timeout <= 0 {
-		timeout = defaultVerifyTimeout
-	}
-	return &Verifier{verifier: v, timeout: timeout}, nil
+	return &Verifier{verifier: v}, nil
 }
 
 // verifySignature parses the bundle JSON and verifies it against the index
@@ -120,7 +112,14 @@ func (v *Verifier) verifySignature(ctx context.Context, bundleJSON []byte, index
 // identity POLICY (TOFU) is applied by the caller against the returned id, so
 // this stays a pure crypto check (mirrors the hub's verifyEntity using
 // WithoutIdentitiesUnsafe — identity is pinned out-of-band, not at verify time).
+//
+// Verification is offline and deterministic (the trusted root is embedded; no
+// network I/O or blocking I/O occurs), so no timeout is needed here — a cheap
+// ctx.Err() pre-check is sufficient to respect cancellation.
 func (v *Verifier) verifyEntity(ctx context.Context, entity sgverify.SignedEntity, indexDigest string) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 	digestBytes, err := hex.DecodeString(strings.TrimPrefix(indexDigest, "sha256:"))
 	if err != nil || len(digestBytes) != sha256.Size {
 		return "", fmt.Errorf("%w: invalid index digest %q", ErrSignatureInvalid, indexDigest)
@@ -129,24 +128,7 @@ func (v *Verifier) verifyEntity(ctx context.Context, entity sgverify.SignedEntit
 		sgverify.WithArtifactDigest("sha256", digestBytes),
 		sgverify.WithoutIdentitiesUnsafe(),
 	)
-
-	type res struct {
-		id  string
-		err error
-	}
-	ch := make(chan res, 1)
-	go func() {
-		id, err := v.runVerify(entity, policy)
-		ch <- res{id, err}
-	}()
-	select {
-	case <-ctx.Done():
-		return "", ctx.Err()
-	case <-time.After(v.timeout):
-		return "", fmt.Errorf("%w: verification timed out after %s", ErrSignatureInvalid, v.timeout)
-	case r := <-ch:
-		return r.id, r.err
-	}
+	return v.runVerify(entity, policy)
 }
 
 func (v *Verifier) runVerify(entity sgverify.SignedEntity, policy sgverify.PolicyBuilder) (string, error) {

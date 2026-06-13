@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"testing"
-	"time"
 
 	"github.com/sigstore/sigstore-go/pkg/testing/ca"
 )
@@ -50,24 +49,5 @@ func TestVerifySignature_NilBundleIsUnsigned(t *testing.T) {
 		"0000000000000000000000000000000000000000000000000000000000000000")
 	if !errors.Is(err, ErrUnsigned) {
 		t.Fatalf("expected ErrUnsigned, got %v", err)
-	}
-}
-
-// A canceled context aborts verification (fail-closed, not hang).
-func TestVerifyEntity_ContextCanceled(t *testing.T) {
-	vs, err := ca.NewVirtualSigstore()
-	if err != nil {
-		t.Fatal(err)
-	}
-	b := buildHostIndex(t)
-	v := testVerifier(t, vs)
-	entity := b.signEntity(t, vs, testSANRef, testIssuer)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	// Give the canceled context priority by using a long verify timeout.
-	v.timeout = 10 * time.Second
-	if _, err := v.verifyEntity(ctx, entity, b.idxDesc.Digest.String()); err == nil {
-		t.Fatal("expected error on canceled context")
 	}
 }

@@ -80,3 +80,90 @@ func TestResolveVersion_NoVersionsPublished(t *testing.T) {
 		t.Error("a plugin with no latest_version must error on default-version resolve")
 	}
 }
+
+func TestResolveRelease(t *testing.T) {
+	d := &PluginDetail{
+		Namespace: "ossf", PluginID: "pvtr-github-repo", LatestVersion: "1.4.0",
+		Releases: []PluginRelease{
+			{Version: "1.4.0", IndexDigest: "sha256:aa", Signed: true},
+			{Version: "1.3.0", IndexDigest: "sha256:bb", Signed: true},
+		},
+	}
+
+	// Empty requestedVersion resolves to the latest release.
+	r, err := d.ResolveRelease("")
+	if err != nil {
+		t.Fatalf("ResolveRelease empty: %v", err)
+	}
+	if r.Version != "1.4.0" {
+		t.Errorf("latest version = %q, want 1.4.0", r.Version)
+	}
+	if r.IndexDigest != "sha256:aa" {
+		t.Errorf("latest digest = %q, want sha256:aa", r.IndexDigest)
+	}
+
+	// Pinned version returns the matching release including its digest.
+	r, err = d.ResolveRelease("1.3.0")
+	if err != nil {
+		t.Fatalf("ResolveRelease 1.3.0: %v", err)
+	}
+	if r.Version != "1.3.0" {
+		t.Errorf("pinned version = %q, want 1.3.0", r.Version)
+	}
+	if r.IndexDigest != "sha256:bb" {
+		t.Errorf("pinned digest = %q, want sha256:bb", r.IndexDigest)
+	}
+
+	// Unknown version → error.
+	if _, err := d.ResolveRelease("9.9.9"); err == nil {
+		t.Error("pin to a non-existent version must error")
+	}
+}
+
+func TestResolveRelease_NoVersionsPublished(t *testing.T) {
+	d := &PluginDetail{Namespace: "ossf", PluginID: "p"}
+	if _, err := d.ResolveRelease(""); err == nil {
+		t.Error("a plugin with no latest_version must error on default-version resolve")
+	}
+}
+
+func TestResolveRelease_LatestMissingFromList(t *testing.T) {
+	// Hub declares a latest_version that isn't in the releases list:
+	// ResolveRelease should synthesise a stub rather than error.
+	d := &PluginDetail{
+		Namespace: "ossf", PluginID: "p", LatestVersion: "2.0.0",
+		Releases: []PluginRelease{
+			{Version: "1.4.0", IndexDigest: "sha256:aa"},
+		},
+	}
+	r, err := d.ResolveRelease("")
+	if err != nil {
+		t.Fatalf("expected stub release, got error: %v", err)
+	}
+	if r.Version != "2.0.0" {
+		t.Errorf("stub version = %q, want 2.0.0", r.Version)
+	}
+	if r.IndexDigest != "" {
+		t.Errorf("stub should have empty digest, got %q", r.IndexDigest)
+	}
+}
+
+// ResolveVersion is a thin wrapper over ResolveRelease — verify it still
+// works correctly so the two cannot drift.
+func TestResolveVersion_DelegatesToResolveRelease(t *testing.T) {
+	d := &PluginDetail{
+		Namespace: "ossf", PluginID: "p", LatestVersion: "1.4.0",
+		Releases: []PluginRelease{
+			{Version: "1.4.0", IndexDigest: "sha256:aa"},
+			{Version: "1.3.0", IndexDigest: "sha256:bb"},
+		},
+	}
+	v, err := d.ResolveVersion("")
+	if err != nil || v != "1.4.0" {
+		t.Errorf("ResolveVersion empty → (%q, %v), want 1.4.0", v, err)
+	}
+	v, err = d.ResolveVersion("1.3.0")
+	if err != nil || v != "1.3.0" {
+		t.Errorf("ResolveVersion 1.3.0 → (%q, %v)", v, err)
+	}
+}

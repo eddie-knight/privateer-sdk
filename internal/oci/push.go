@@ -119,8 +119,10 @@ func newPluginRepository(opts PushOptions, coordinate string) (*remote.Repositor
 	case opts.RegistryToken != "":
 		// Authenticated push: hand oras the registry token we already minted at
 		// /v2/token, scoped to this exact repo, so it goes straight to the
-		// registry (no oras-side token exchange).
+		// registry (no oras-side token exchange). Use registryHTTPClient so push
+		// gets the same TLS-handshake and response-header bounds as pull.
 		repo.Client = &auth.Client{
+			Client: registryHTTPClient(),
 			Credential: auth.StaticCredential(opts.RegistryHost, auth.Credential{
 				AccessToken: opts.RegistryToken,
 			}),

@@ -133,8 +133,17 @@ func PollForToken(ctx context.Context, meta *OIDCMetadata, clientID string, da *
 	form.Set("grant_type", "urn:ietf:params:oauth:grant-type:device_code")
 	form.Set("device_code", da.DeviceCode)
 
+	expiresIn := da.ExpiresIn
+	if expiresIn <= 0 {
+		expiresIn = 1800 // RFC 8628 servers SHOULD send expires_in; bound the poll regardless
+	}
+	deadline := time.Now().Add(time.Duration(expiresIn) * time.Second)
+
 	interval := time.Duration(da.Interval) * time.Second
 	for {
+		if time.Now().After(deadline) {
+			return nil, ErrExpiredDeviceCode
+		}
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
@@ -216,10 +225,7 @@ func postForm(ctx context.Context, endpoint string, form url.Values) (*http.Resp
 }
 
 func credsFromTokenResponse(issuer string, tr *tokenResponse) *Credentials {
-	lifetime := time.Duration(tr.ExpiresIn) * time.Second
-	if lifetime < 30*time.Second {
-		lifetime = 30 * time.Second
-	}
+	lifetime := max(time.Duration(tr.ExpiresIn)*time.Second, 30*time.Second)
 	return &Credentials{
 		Issuer:       issuer,
 		AccessToken:  tr.AccessToken,

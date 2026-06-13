@@ -1,11 +1,8 @@
 package oci
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"time"
 )
@@ -23,41 +20,34 @@ type syncRequest struct {
 // root, authorizes by namespace ownership, and persists it. upstreamBearer is
 // the same OIDC token used for the push (the hub authorizes /sync by namespace
 // ownership). hubURL is the hub base (PVTR_HUB_URL).
+//
+// The hub performs server-side work (signature verification, registry re-fetch)
+// so sync gets a 60-second bound — longer than the 15-second default for plain
+// hub-API GETs. The bound lives on this call's own http.Client; the request
+// still carries the caller's context, so an already-cancelled parent
+// short-circuits immediately. The request is routed through the hub Client's
+// doJSON helper for a consistent error shape.
 func Sync(ctx context.Context, hubURL, coordinate, tag, upstreamBearer string) error {
 	ns, id, ok := splitCoordinate(coordinate)
 	if !ok {
 		return fmt.Errorf("invalid coordinate %q for sync", coordinate)
 	}
-	body, err := json.Marshal(syncRequest{
+
+	// 60-second client timeout (not the shared 15-second NewClient default):
+	// http.Client.Timeout fires independently of the context, so reusing the
+	// 15-second client would silently cap sync at 15s regardless of any context
+	// deadline. The caller's context still propagates via NewRequestWithContext.
+	c := &Client{baseURL: hubURL, httpClient: &http.Client{Timeout: 60 * time.Second}}
+	path := fmt.Sprintf("/v1/plugins/%s/%s/sync", ns, id)
+	body := syncRequest{
 		Repository: fmt.Sprintf("%s/%s/%s", ns, ReservedPluginSegment, id),
 		Tag:        tag,
-	})
-	if err != nil {
-		return fmt.Errorf("encoding sync request: %w", err)
 	}
-	endpoint := fmt.Sprintf("%s/v1/plugins/%s/%s/sync", hubURL, ns, id)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
-	if err != nil {
-		return fmt.Errorf("building sync request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	if upstreamBearer != "" {
-		req.Header.Set("Authorization", "Bearer "+upstreamBearer)
-	}
-	resp, err := (&http.Client{Timeout: 60 * time.Second}).Do(req)
-	if err != nil {
-		return fmt.Errorf("POST %s: %w", endpoint, err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		detail, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
+	if err := c.doJSON(ctx, "POST", path, upstreamBearer, body, nil); err != nil {
 		// The hub returns actionable JSON errors (plugin_unsigned,
-		// plugin_signer_mismatch, registry_diverged, …); surface them verbatim.
-		return fmt.Errorf("hub sync of %s:%s returned %d: %s", coordinate, tag, resp.StatusCode, bytesTrim(detail))
+		// plugin_signer_mismatch, registry_diverged, …); doJSON captures the
+		// response body into the error so they surface verbatim.
+		return fmt.Errorf("hub sync of %s:%s: %w", coordinate, tag, err)
 	}
 	return nil
-}
-
-func bytesTrim(b []byte) string {
-	return string(bytes.TrimSpace(b))
 }

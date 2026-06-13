@@ -4,11 +4,12 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
-	"time"
 )
 
 // tokenResponse is the hub's GET /v2/token reply (Docker token-auth scheme,
@@ -43,12 +44,7 @@ type RegistryToken struct {
 // GrantsPush reports whether the minted token authorizes pushing to the plugin
 // repo.
 func (t RegistryToken) GrantsPush() bool {
-	for _, a := range t.Actions {
-		if a == "push" {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(t.Actions, "push")
 }
 
 // MintRegistryToken exchanges an upstream OIDC bearer for a zot registry token
@@ -60,6 +56,8 @@ func (t RegistryToken) GrantsPush() bool {
 //
 // hubURL is the hub base; coordinate is "<ns>/<plugin_id>"; upstreamBearer is
 // the device-grant / GHA-OIDC token (empty → an anonymous pull-only token).
+// The request is routed through the hub Client's doJSON helper so the transport
+// bounds (15s timeout, shared error shape) are consistent with other hub API calls.
 func MintRegistryToken(ctx context.Context, hubURL, coordinate, upstreamBearer string) (RegistryToken, error) {
 	ns, id, ok := splitCoordinate(coordinate)
 	if !ok {
@@ -69,26 +67,18 @@ func MintRegistryToken(ctx context.Context, hubURL, coordinate, upstreamBearer s
 	q := url.Values{}
 	q.Set("scope", fmt.Sprintf("repository:%s:pull,push", repo))
 	q.Set("service", "zot")
-	endpoint := fmt.Sprintf("%s/v2/token?%s", hubURL, q.Encode())
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
-	if err != nil {
-		return RegistryToken{}, fmt.Errorf("building token request: %w", err)
-	}
-	if upstreamBearer != "" {
-		req.Header.Set("Authorization", "Bearer "+upstreamBearer)
-	}
-	resp, err := (&http.Client{Timeout: 15 * time.Second}).Do(req)
-	if err != nil {
-		return RegistryToken{}, fmt.Errorf("GET %s: %w", endpoint, err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		return RegistryToken{}, fmt.Errorf("minting registry token (GET /v2/token) returned %d — your login may be expired", resp.StatusCode)
-	}
+	// Build a temporary hub client targeting the caller-supplied URL.
+	// doJSON is used for the shared transport bounds and consistent error shape;
+	// the bearer is passed as the Authorization header.
+	c := &Client{baseURL: hubURL, httpClient: NewClient().httpClient}
 	var tr tokenResponse
-	if err := json.NewDecoder(resp.Body).Decode(&tr); err != nil {
-		return RegistryToken{}, fmt.Errorf("decoding token response: %w", err)
+	if err := c.doJSON(ctx, "GET", "/v2/token?"+q.Encode(), upstreamBearer, nil, &tr); err != nil {
+		var statusErr *httpStatusError
+		if errors.As(err, &statusErr) && statusErr.status == http.StatusUnauthorized {
+			return RegistryToken{}, fmt.Errorf("minting registry token: %w — your login may be expired, run `pvtr login`", err)
+		}
+		return RegistryToken{}, fmt.Errorf("minting registry token: %w", err)
 	}
 	tok := tr.Token
 	if tok == "" {

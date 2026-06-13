@@ -3,6 +3,7 @@ package verify
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"runtime"
 
@@ -62,18 +63,62 @@ type VerifiedPlugin struct {
 // order is load-bearing: verify the signature and identity BEFORE trusting any
 // index bytes, then walk index → child → config/layer → bytes, checking every
 // digest. Any failure aborts; nothing degrades to an unverified copy.
+//
+// Multiple signature bundles are tried in order (they accumulate because
+// AttachSignature never removes prior referrers and re-signing is
+// content-addressed/idempotent). The first bundle that passes BOTH signature
+// verification and the identity policy proceeds to the walk. If no bundle
+// passes, the errors are collected and the first error's sentinel is preserved
+// so errors.Is(err, ErrSignatureInvalid) / ErrIdentityMismatch still work.
 func (v *Verifier) Index(ctx context.Context, fetched *oci.FetchedIndex, policy IdentityPolicy) (*VerifiedPlugin, error) {
 	if fetched == nil {
 		return nil, fmt.Errorf("%w: nil fetched index", ErrMalformedIndex)
 	}
 	// 1. Verify the index signature against the index digest (keyless: Fulcio
 	//    chain + SCT + Rekor inclusion, offline against the pinned root).
+	//    Re-signing accumulates bundles without removing prior ones, so we
+	//    iterate all bundles and proceed with the first that passes both
+	//    cryptographic verification and the identity policy.
 	indexDigest := fetched.IndexDescriptor.Digest.String()
-	signerIdentity, err := v.verifySignature(ctx, fetched.SignatureBundle, indexDigest)
-	if err != nil {
-		return nil, err // ErrUnsigned / ErrSignatureInvalid, already wrapped
+
+	if len(fetched.SignatureBundles) == 0 {
+		return nil, ErrUnsigned
 	}
-	return v.walkVerifiedIndex(ctx, fetched, signerIdentity, policy)
+
+	var bundleErrs []error
+	for _, bundleJSON := range fetched.SignatureBundles {
+		signerIdentity, err := v.verifySignature(ctx, bundleJSON, indexDigest)
+		if err != nil {
+			bundleErrs = append(bundleErrs, err)
+			continue
+		}
+		if err := policy.check(signerIdentity); err != nil {
+			bundleErrs = append(bundleErrs, err)
+			continue
+		}
+		// This bundle passed both crypto verification and the identity policy —
+		// proceed to the walk. The policy is also enforced inside walkVerifiedIndex
+		// (step 2) for callers that invoke it directly (harness tests); running it
+		// here first means walk is only reached with a known-good identity.
+		return v.walkVerifiedIndex(ctx, fetched, signerIdentity, policy)
+	}
+
+	// No bundle passed. If the index carried more signature referrers than were
+	// inspected, say so explicitly: a registry that floods junk referrers must
+	// not be able to mask a real signature as a plain verification failure or
+	// (worse) as "unsigned". This is diagnosable and fails closed.
+	if fetched.SignaturesTruncated {
+		return nil, fmt.Errorf("%w: no valid signature among the first %d referrers, but the index carries more (a valid signature may exist beyond the inspection limit; the registry may be flooding referrers)",
+			ErrSignatureInvalid, len(bundleErrs))
+	}
+	// For a single bundle the error is returned directly so
+	// errors.Is(err, ErrSignatureInvalid) / ErrIdentityMismatch work as before.
+	// For multiple bundles, errors.Join wraps all of them — errors.Is still
+	// walks the joined tree so sentinels remain detectable.
+	if len(bundleErrs) == 1 {
+		return nil, bundleErrs[0]
+	}
+	return nil, fmt.Errorf("no valid signature bundle found (tried %d): %w", len(bundleErrs), errors.Join(bundleErrs...))
 }
 
 // walkVerifiedIndex runs steps 2-8 after the signature has been verified and the
@@ -155,12 +200,19 @@ func (v *Verifier) walkVerifiedIndex(ctx context.Context, fetched *oci.FetchedIn
 	}
 
 	// 8. Trusted facts: entrypoint/protocol from the digest-checked config; the
-	//    config version must equal the tag we resolved.
+	//    config version and plugin coordinate must equal what was requested.
+	//    The coordinate check closes a substitution window: a validly-signed
+	//    index for a *different* plugin served under the requested coordinate
+	//    would otherwise pass verification — AssembleIndex writes cfg.Plugin
+	//    into the config blob precisely so this check can catch it.
 	if cfg.Entrypoint == "" {
 		return nil, fmt.Errorf("%w: config has no entrypoint", ErrMalformedIndex)
 	}
 	if cfg.Version != fetched.Version {
 		return nil, fmt.Errorf("%w: config version %q != requested tag %q", ErrMalformedIndex, cfg.Version, fetched.Version)
+	}
+	if cfg.Plugin != fetched.Coordinate {
+		return nil, fmt.Errorf("%w: config plugin %q != requested coordinate %q", ErrMalformedIndex, cfg.Plugin, fetched.Coordinate)
 	}
 
 	osName, arch := childDesc.Platform.OS, childDesc.Platform.Architecture

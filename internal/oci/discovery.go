@@ -9,9 +9,11 @@
 package oci
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -75,38 +77,82 @@ func NewClient() *Client {
 func (c *Client) BaseURL() string { return c.baseURL }
 
 // httpStatusError is a non-200 response from the hub. It carries the status so
-// callers can map a specific code (e.g. 404 → ErrPluginNotFound).
+// callers can map a specific code (e.g. 404 → ErrPluginNotFound). body holds
+// a bounded snippet of the response body when one was captured (e.g. from POST
+// endpoints that return actionable JSON error codes); it is empty for plain GET
+// discovery/browse paths where the body adds nothing useful.
 type httpStatusError struct {
+	method   string
 	endpoint string
 	status   int
+	body     string // optional: non-empty snippet of the error response body
 }
 
 func (e *httpStatusError) Error() string {
-	return fmt.Sprintf("GET %s returned status %d", e.endpoint, e.status)
+	method := e.method
+	if method == "" {
+		method = http.MethodGet
+	}
+	if e.body != "" {
+		return fmt.Sprintf("%s %s returned status %d: %s", method, e.endpoint, e.status, e.body)
+	}
+	return fmt.Sprintf("%s %s returned status %d", method, e.endpoint, e.status)
 }
 
-// getJSON performs an anonymous GET against the hub and decodes a 200 response
-// body into out. It is the one place the build-request → Do → status → decode
-// dance lives, shared by Discover/Browse/GetPluginDetail. A non-200 yields an
-// *httpStatusError so a caller can inspect the code.
-func (c *Client) getJSON(ctx context.Context, path string, out any) error {
+// doJSON is the shared HTTP request helper for all hub API calls. It:
+//   - builds a request with the given method and path (relative to c.baseURL);
+//   - marshals reqBody as JSON and sets Content-Type when reqBody is non-nil;
+//   - sets Authorization: Bearer <bearer> when bearer is non-empty;
+//   - on non-200, captures a bounded body snippet (4 KiB) and returns an
+//     *httpStatusError — preserving actionable hub error codes (e.g.
+//     plugin_unsigned) in error messages for POST endpoints;
+//   - on 200, decodes the response body into out (when out is non-nil).
+//
+// It is the one place the build-request → Do → status → decode dance lives.
+// getJSON is a thin convenience wrapper for anonymous GETs that decode into out.
+func (c *Client) doJSON(ctx context.Context, method, path, bearer string, reqBody, out any) error {
 	endpoint := c.baseURL + path
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	var bodyReader io.Reader
+	if reqBody != nil {
+		data, err := json.Marshal(reqBody)
+		if err != nil {
+			return fmt.Errorf("encoding request body for %s: %w", endpoint, err)
+		}
+		bodyReader = bytes.NewReader(data)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, endpoint, bodyReader)
 	if err != nil {
 		return fmt.Errorf("building request for %s: %w", endpoint, err)
 	}
+	if reqBody != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	if bearer != "" {
+		req.Header.Set("Authorization", "Bearer "+bearer)
+	}
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("GET %s: %w", endpoint, err)
+		return fmt.Errorf("%s %s: %w", method, endpoint, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
-		return &httpStatusError{endpoint: endpoint, status: resp.StatusCode}
+		detail, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
+		return &httpStatusError{method: method, endpoint: endpoint, status: resp.StatusCode, body: string(bytes.TrimSpace(detail))}
 	}
-	if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
-		return fmt.Errorf("decoding response from %s: %w", endpoint, err)
+	if out != nil {
+		if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
+			return fmt.Errorf("decoding response from %s: %w", endpoint, err)
+		}
 	}
 	return nil
+}
+
+// getJSON performs an anonymous GET against the hub and decodes a 200 response
+// body into out. It is a thin wrapper over doJSON for the common anonymous-GET
+// case (Discover, Browse, GetPluginDetail). A non-200 yields an *httpStatusError
+// so a caller can inspect the code.
+func (c *Client) getJSON(ctx context.Context, path string, out any) error {
+	return c.doJSON(ctx, http.MethodGet, path, "", nil, out)
 }
 
 // Discover fetches and decodes the hub's /.well-known/ext.grc-store document.
@@ -125,27 +171,53 @@ func (c *Client) Discover(ctx context.Context) (*Discovery, error) {
 	return &d, nil
 }
 
-// RegistryHost returns the OCI registry host (no scheme, no trailing slash)
-// to build an oras/Docker reference from. registry_url is advertised WITH a
-// scheme (ADR-0026) but OCI references are host[:port]-only, so the scheme is
-// stripped here — the one place that conversion lives.
-func (d *Discovery) RegistryHost() (string, error) {
+// parseRegistryURL normalises registry_url into a *url.URL, applying the same
+// whitespace-trimming that RegistryHost uses. It is the shared parse step that
+// both RegistryHost and PlainHTTP delegate to so neither can drift.
+//
+// Values without a "scheme://" prefix are treated as bare host[:port] strings
+// (no scheme → neither http:// nor https://). url.Parse mis-parses bare
+// "localhost:5050" as scheme="localhost", opaque="5050", so we only call it
+// when the separator is present.
+func (d *Discovery) parseRegistryURL() (*url.URL, error) {
 	raw := strings.TrimSpace(d.RegistryURL)
 	if raw == "" {
-		return "", fmt.Errorf("registry_url is empty")
+		return nil, fmt.Errorf("registry_url is empty")
 	}
-	// Without a "scheme://" prefix the value is already a bare host[:port].
-	// Don't run it through url.Parse — it would mis-parse "localhost:5050" as
-	// scheme="localhost", opaque="5050" and lose the host entirely.
 	if !strings.Contains(raw, "://") {
-		return strings.TrimRight(raw, "/"), nil
+		// No scheme present — treat as a bare host[:port] with an implied https.
+		return &url.URL{Scheme: "https", Host: strings.TrimRight(raw, "/")}, nil
 	}
 	u, err := url.Parse(raw)
 	if err != nil {
-		return "", fmt.Errorf("parsing registry_url %q: %w", raw, err)
+		return nil, fmt.Errorf("parsing registry_url %q: %w", raw, err)
 	}
 	if u.Host == "" {
-		return "", fmt.Errorf("registry_url %q has no host", raw)
+		return nil, fmt.Errorf("registry_url %q has no host", raw)
+	}
+	return u, nil
+}
+
+// RegistryHost returns the OCI registry host (no scheme, no trailing slash)
+// to build an oras/Docker reference from. registry_url is advertised WITH a
+// scheme (ADR-0026) but OCI references are host[:port]-only, so the scheme is
+// stripped here — part of the same single-point-of-truth as PlainHTTP.
+func (d *Discovery) RegistryHost() (string, error) {
+	u, err := d.parseRegistryURL()
+	if err != nil {
+		return "", err
 	}
 	return strings.TrimRight(u.Host, "/"), nil
+}
+
+// PlainHTTP reports whether the discovered registry_url uses http:// (local
+// dev registries) and therefore requires plain-HTTP transport instead of TLS.
+// Part of the same single-point-of-truth as RegistryHost — both delegate to
+// parseRegistryURL so the scheme interpretation can never drift between them.
+func (d *Discovery) PlainHTTP() bool {
+	u, err := d.parseRegistryURL()
+	if err != nil {
+		return false
+	}
+	return u.Scheme == "http"
 }

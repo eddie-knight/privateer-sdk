@@ -66,10 +66,32 @@ func writeInstallablePlugins(writer Writer) {
 		return
 	}
 	local := getLocalPlugins()
+	renderInstallableList(writer, remote, local, oci.HubURL())
+}
+
+// renderInstallableList writes the "Plugins that can be installed:" block.
+// Extracted from writeInstallablePlugins so tests can drive it without a
+// network call by supplying pre-fetched remote and local slices.
+// When every remote plugin is already installed (or the remote list is empty),
+// an explicit empty-state message is printed so the user knows where we looked
+// rather than seeing a header with nothing beneath it.
+func renderInstallableList(writer io.Writer, remote, local []*PluginPkg, hubURL string) {
 	_, _ = fmt.Fprintln(writer, "Plugins that can be installed:")
+	printed := 0
 	for _, vp := range remote {
 		if !Contains(local, vp.Name) {
 			_, _ = fmt.Fprintf(writer, "  - %s\n", vp.Name)
+			printed++
+		}
+	}
+	if printed == 0 {
+		// Nothing left to offer. Distinguish "the hub published nothing" (fresh
+		// hub or API shape-drift) from "everything is already installed" — a
+		// blank list under the header is confusing either way.
+		if len(remote) == 0 {
+			_, _ = fmt.Fprintf(writer, "  (no plugins published on %s yet)\n", hubURL)
+		} else {
+			_, _ = fmt.Fprintln(writer, "  (all published plugins are already installed)")
 		}
 	}
 }

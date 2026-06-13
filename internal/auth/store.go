@@ -88,6 +88,10 @@ func (s *Store) Get(issuer string) (*Credentials, error) {
 
 // Put writes creds.Issuer → creds, replacing any existing entry. The file is
 // rewritten atomically (temp + rename) with 0600 perms.
+// NOTE: intentionally does NOT use utils.WriteFileAtomic — credentials require
+// os.CreateTemp (kernel-assigned unique name) + os.File.Chmod(0600) before any
+// write, so the 0600 mode is set before secret bytes land on disk. The shared
+// helper's WriteFile+rename sequence cannot provide that ordering guarantee.
 func (s *Store) Put(creds *Credentials) error {
 	if creds == nil {
 		return errors.New("credentials are required")

@@ -98,9 +98,10 @@ func BearerToken(ctx context.Context, issuer, clientID string) (string, error) {
 		return "", fmt.Errorf("refreshing expired credentials (run `pvtr login` if this keeps failing): %w", err)
 	}
 	if perr := store.Put(refreshed); perr != nil {
-		// A failed cache write shouldn't fail the publish — we still have a
-		// valid token in hand. Surface it but proceed.
-		return refreshed.AccessToken, nil
+		// A failed cache write must not fail the operation — we still hold a valid
+		// token — but it must be VISIBLE: under refresh-token rotation the on-disk
+		// token is now consumed, so the next run will force a re-login.
+		fmt.Fprintf(os.Stderr, "warning: failed to cache refreshed credentials (next run may require `pvtr login`): %v\n", perr)
 	}
 	return refreshed.AccessToken, nil
 }

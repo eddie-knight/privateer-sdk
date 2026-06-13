@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/privateerproj/privateer-sdk/utils"
 )
 
 const filename = "plugins.json"
@@ -57,7 +59,9 @@ func Load(binariesPath string) (*Manifest, error) {
 	return &m, nil
 }
 
-// Save writes the manifest to {binariesPath}/plugins.json atomically.
+// Save writes the manifest to {binariesPath}/plugins.json atomically via
+// utils.WriteFileAtomic (temp + rename) so a crash mid-write can never leave a
+// partial manifest that causes the next run to error on JSON parse.
 func (m *Manifest) Save(binariesPath string) error {
 	data, err := json.MarshalIndent(m, "", "  ")
 	if err != nil {
@@ -66,15 +70,7 @@ func (m *Manifest) Save(binariesPath string) error {
 	data = append(data, '\n')
 
 	dest := filepath.Join(binariesPath, filename)
-	tmp := dest + ".tmp"
-	if err := os.WriteFile(tmp, data, 0644); err != nil {
-		return fmt.Errorf("writing %s: %w", tmp, err)
-	}
-	if err := os.Rename(tmp, dest); err != nil {
-		_ = os.Remove(tmp)
-		return fmt.Errorf("renaming %s to %s: %w", tmp, dest, err)
-	}
-	return nil
+	return utils.WriteFileAtomic(dest, data, 0644)
 }
 
 // Add upserts a plugin entry by name.

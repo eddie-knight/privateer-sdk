@@ -29,23 +29,42 @@ type PluginRelease struct {
 // Coordinate returns "<namespace>/<plugin_id>".
 func (d *PluginDetail) Coordinate() string { return d.Namespace + "/" + d.PluginID }
 
-// ResolveVersion returns the version to install: requestedVersion if it exists
-// in the release history, else an error; or latest_version when requestedVersion
-// is empty. Pinning resolves against the authoritative release list, not a
-// client guess.
-func (d *PluginDetail) ResolveVersion(requestedVersion string) (string, error) {
+// ResolveRelease returns the release to install: the one matching
+// requestedVersion, or the latest_version release when requestedVersion is
+// empty. Resolving against the authoritative release list (not a client
+// guess) is what lets the installer cross-check the hub-recorded
+// index_digest against what the registry actually serves.
+func (d *PluginDetail) ResolveRelease(requestedVersion string) (*PluginRelease, error) {
 	if requestedVersion == "" {
 		if d.LatestVersion == "" {
-			return "", fmt.Errorf("plugin %s has no published versions", d.Coordinate())
+			return nil, fmt.Errorf("plugin %s has no published versions", d.Coordinate())
 		}
-		return d.LatestVersion, nil
+		for i := range d.Releases {
+			if d.Releases[i].Version == d.LatestVersion {
+				return &d.Releases[i], nil
+			}
+		}
+		// Hub response normally includes the latest release in the list, but if
+		// for some reason the release list doesn't contain it, synthesise a stub
+		// so the caller at least has the version string.
+		return &PluginRelease{Version: d.LatestVersion}, nil
 	}
-	for _, r := range d.Releases {
-		if r.Version == requestedVersion {
-			return requestedVersion, nil
+	for i := range d.Releases {
+		if d.Releases[i].Version == requestedVersion {
+			return &d.Releases[i], nil
 		}
 	}
-	return "", fmt.Errorf("plugin %s has no version %q (latest is %s)", d.Coordinate(), requestedVersion, d.LatestVersion)
+	return nil, fmt.Errorf("plugin %s has no version %q (latest is %s)", d.Coordinate(), requestedVersion, d.LatestVersion)
+}
+
+// ResolveVersion returns the version string to install. It is a thin wrapper
+// over ResolveRelease so the two cannot drift.
+func (d *PluginDetail) ResolveVersion(requestedVersion string) (string, error) {
+	r, err := d.ResolveRelease(requestedVersion)
+	if err != nil {
+		return "", err
+	}
+	return r.Version, nil
 }
 
 // ErrPluginNotFound is returned when the hub has no such plugin coordinate.

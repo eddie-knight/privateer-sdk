@@ -2,8 +2,13 @@ package auth
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
+	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 )
@@ -57,5 +62,75 @@ func TestBearerToken_FromStore(t *testing.T) {
 func TestFetchOIDCMetadata_RequiresIssuer(t *testing.T) {
 	if _, err := FetchOIDCMetadata(context.Background(), ""); err == nil {
 		t.Error("empty issuer must error")
+	}
+}
+
+// TestBearerToken_StoreWriteFailureReturnsToken verifies that when the
+// credential store's Put fails (e.g. the directory is not writable) after a
+// successful token refresh, BearerToken still returns the valid access token
+// rather than surfacing the write error.  Under refresh-token rotation the
+// old token is consumed, so this is a best-effort path — the warning on
+// stderr is informational; returning the token is mandatory.
+func TestBearerToken_StoreWriteFailureReturnsToken(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("chmod-based read-only dir test not applicable on Windows")
+	}
+
+	// Spin up a minimal OIDC server: one endpoint serves the discovery doc and
+	// another serves the token endpoint (refresh grant).
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/.well-known/openid-configuration":
+			_ = json.NewEncoder(w).Encode(OIDCMetadata{
+				Issuer:                      "http://" + r.Host,
+				DeviceAuthorizationEndpoint: "http://" + r.Host + "/device",
+				TokenEndpoint:               "http://" + r.Host + "/token",
+			})
+		case "/token":
+			// Serve a fresh access token for any refresh_token grant.
+			_ = json.NewEncoder(w).Encode(tokenResponse{
+				AccessToken:  "refreshed-token",
+				TokenType:    "Bearer",
+				ExpiresIn:    3600,
+				RefreshToken: "new-refresh",
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	// Isolate the store under a temp dir.
+	dir := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", dir)
+	t.Setenv(tokenEnv, "")
+
+	// Pre-populate the store with expired credentials that carry a refresh
+	// token, using the test server as the issuer.
+	storeDir := filepath.Join(dir, "pvtr")
+	s := &Store{Path: filepath.Join(storeDir, "credentials.json")}
+	if err := s.Put(&Credentials{
+		Issuer:       srv.URL,
+		AccessToken:  "old-token",
+		RefreshToken: "old-refresh",
+		ExpiresAt:    time.Now().Add(-time.Hour), // already expired
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Make the store directory read-only so the Put of the refreshed token
+	// will fail (os.CreateTemp can't create a temp file in a non-writable dir).
+	if err := os.Chmod(storeDir, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(storeDir, 0o700) }) // restore so TempDir cleanup works
+
+	tok, err := BearerToken(context.Background(), srv.URL, "client-id")
+	if err != nil {
+		t.Fatalf("BearerToken returned error despite valid refreshed token: %v", err)
+	}
+	if tok != "refreshed-token" {
+		t.Errorf("got token %q, want %q", tok, "refreshed-token")
 	}
 }
