@@ -2,7 +2,7 @@ package pluginkit
 
 import (
 	"fmt"
-	"sort"
+	"slices"
 	"strings"
 )
 
@@ -79,7 +79,7 @@ func (v *EvaluationOrchestrator) PublishManifest() (PublishManifest, error) {
 		if len(reqs) == 0 {
 			return PublishManifest{}, fmt.Errorf("evaluated catalog %q declares no controls", id)
 		}
-		sort.Strings(reqs)
+		slices.Sort(reqs)
 
 		// Resolve the catalog's owning namespace for an ACCURATE cross-link. The
 		// catalog itself is the source of truth via metadata.author.id; an explicit
@@ -111,7 +111,7 @@ func (v *EvaluationOrchestrator) PublishManifest() (PublishManifest, error) {
 	}
 	// Stable order: referenceCatalogs is a map, so sort the output so the manifest
 	// (and the downstream signed config blob) is byte-deterministic.
-	sort.Slice(evals, func(i, j int) bool { return evals[i].Catalog < evals[j].Catalog })
+	slices.SortFunc(evals, func(a, b EvaluatesDeclaration) int { return strings.Compare(a.Catalog, b.Catalog) })
 
 	return PublishManifest{Coordinate: publisher + "/" + pluginID, Evaluates: evals}, nil
 }

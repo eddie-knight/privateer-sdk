@@ -23,6 +23,11 @@ const sigstoreOIDCIssuer = "https://oauth2.sigstore.dev/auth"
 // (the same cosign uses).
 const sigstoreClientID = "sigstore"
 
+// ghaTokenTimeout bounds the GitHub Actions OIDC token request. It is more
+// generous than the hub's httpTimeout because the GHA token service can be
+// slower than the hub's own OIDC discovery.
+const ghaTokenTimeout = 15 * time.Second
+
 // SigningIDToken returns an OIDC ID token suitable for PUBLIC-GOOD Fulcio — the
 // identity the keyless plugin signature is minted under. This is DISTINCT from
 // BearerToken (the grc.store registry/hub login): Fulcio only trusts public OIDC
@@ -69,7 +74,7 @@ func githubActionsSigningToken(ctx context.Context) (string, bool, error) {
 	}
 	req.Header.Set("Authorization", "Bearer "+reqTok)
 	req.Header.Set("Accept", "application/json")
-	resp, err := (&http.Client{Timeout: 15 * time.Second}).Do(req)
+	resp, err := (&http.Client{Timeout: ghaTokenTimeout}).Do(req)
 	if err != nil {
 		return "", false, fmt.Errorf("requesting GHA OIDC token: %w", err)
 	}

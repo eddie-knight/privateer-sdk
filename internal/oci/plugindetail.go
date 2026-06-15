@@ -45,8 +45,10 @@ func (d *PluginDetail) ResolveRelease(requestedVersion string) (*PluginRelease, 
 			}
 		}
 		// Hub response normally includes the latest release in the list, but if
-		// for some reason the release list doesn't contain it, synthesise a stub
-		// so the caller at least has the version string.
+		// for some reason the release list doesn't contain it, synthesise a stub so
+		// the caller at least has the version string. The empty IndexDigest on this
+		// stub disables the install-time registry-divergence cross-check (the caller
+		// warns and proceeds); signature + TOFU verification still run.
 		return &PluginRelease{Version: d.LatestVersion}, nil
 	}
 	for i := range d.Releases {
@@ -55,16 +57,6 @@ func (d *PluginDetail) ResolveRelease(requestedVersion string) (*PluginRelease, 
 		}
 	}
 	return nil, fmt.Errorf("plugin %s has no version %q (latest is %s)", d.Coordinate(), requestedVersion, d.LatestVersion)
-}
-
-// ResolveVersion returns the version string to install. It is a thin wrapper
-// over ResolveRelease so the two cannot drift.
-func (d *PluginDetail) ResolveVersion(requestedVersion string) (string, error) {
-	r, err := d.ResolveRelease(requestedVersion)
-	if err != nil {
-		return "", err
-	}
-	return r.Version, nil
 }
 
 // ErrPluginNotFound is returned when the hub has no such plugin coordinate.

@@ -24,10 +24,16 @@ type Credentials struct {
 	ExpiresAt    time.Time `json:"expires_at"`
 }
 
-// Expired reports whether the access token is at/near expiry (60s renewal
-// window), so callers refresh before a push rather than mid-flight.
+// renewalWindow is how far before ExpiresAt a token is treated as expired, so
+// callers refresh before a push rather than mid-flight. credsFromTokenResponse
+// (oidc.go) floors new-token lifetimes above this so a token is never born
+// already-expired.
+const renewalWindow = 60 * time.Second
+
+// Expired reports whether the access token is at/near expiry (within the
+// renewal window), so callers refresh before a push rather than mid-flight.
 func (c *Credentials) Expired() bool {
-	return time.Now().Add(60 * time.Second).After(c.ExpiresAt)
+	return time.Now().Add(renewalWindow).After(c.ExpiresAt)
 }
 
 // Store is pvtr's on-disk credential cache: a single JSON file at

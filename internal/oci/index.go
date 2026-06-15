@@ -78,7 +78,7 @@ type AssembledIndex struct {
 
 // IndexDigest returns the assembled index's digest (sha256:...), the value the
 // signature is over and that the manifest records.
-func (a *AssembledIndex) IndexDigest() string { return a.Index.Digest.String() }
+func (idx *AssembledIndex) IndexDigest() string { return idx.Index.Digest.String() }
 
 // AssembleParams are the inputs to AssembleIndex.
 type AssembleParams struct {

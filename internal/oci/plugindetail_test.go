@@ -55,32 +55,6 @@ func TestGetPluginDetail_NotFound(t *testing.T) {
 	}
 }
 
-func TestResolveVersion(t *testing.T) {
-	d := &PluginDetail{
-		Namespace: "ossf", PluginID: "p", LatestVersion: "1.4.0",
-		Releases: []PluginRelease{{Version: "1.4.0"}, {Version: "1.3.0"}},
-	}
-	// Empty → latest.
-	if v, err := d.ResolveVersion(""); err != nil || v != "1.4.0" {
-		t.Errorf("empty → (%q, %v), want 1.4.0", v, err)
-	}
-	// Pin to an existing version.
-	if v, err := d.ResolveVersion("1.3.0"); err != nil || v != "1.3.0" {
-		t.Errorf("pin 1.3.0 → (%q, %v)", v, err)
-	}
-	// Pin to a missing version → error naming latest.
-	if _, err := d.ResolveVersion("9.9.9"); err == nil {
-		t.Error("pin to a non-existent version must error")
-	}
-}
-
-func TestResolveVersion_NoVersionsPublished(t *testing.T) {
-	d := &PluginDetail{Namespace: "ossf", PluginID: "p"}
-	if _, err := d.ResolveVersion(""); err == nil {
-		t.Error("a plugin with no latest_version must error on default-version resolve")
-	}
-}
-
 func TestResolveRelease(t *testing.T) {
 	d := &PluginDetail{
 		Namespace: "ossf", PluginID: "pvtr-github-repo", LatestVersion: "1.4.0",
@@ -145,25 +119,5 @@ func TestResolveRelease_LatestMissingFromList(t *testing.T) {
 	}
 	if r.IndexDigest != "" {
 		t.Errorf("stub should have empty digest, got %q", r.IndexDigest)
-	}
-}
-
-// ResolveVersion is a thin wrapper over ResolveRelease — verify it still
-// works correctly so the two cannot drift.
-func TestResolveVersion_DelegatesToResolveRelease(t *testing.T) {
-	d := &PluginDetail{
-		Namespace: "ossf", PluginID: "p", LatestVersion: "1.4.0",
-		Releases: []PluginRelease{
-			{Version: "1.4.0", IndexDigest: "sha256:aa"},
-			{Version: "1.3.0", IndexDigest: "sha256:bb"},
-		},
-	}
-	v, err := d.ResolveVersion("")
-	if err != nil || v != "1.4.0" {
-		t.Errorf("ResolveVersion empty → (%q, %v), want 1.4.0", v, err)
-	}
-	v, err = d.ResolveVersion("1.3.0")
-	if err != nil || v != "1.3.0" {
-		t.Errorf("ResolveVersion 1.3.0 → (%q, %v)", v, err)
 	}
 }

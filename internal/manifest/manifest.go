@@ -70,7 +70,7 @@ func (m *Manifest) Save(binariesPath string) error {
 	data = append(data, '\n')
 
 	dest := filepath.Join(binariesPath, filename)
-	return utils.WriteFileAtomic(dest, data, 0644)
+	return utils.WriteFileAtomic(dest, data, 0o644)
 }
 
 // Add upserts a plugin entry by name.

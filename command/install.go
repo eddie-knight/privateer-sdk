@@ -62,7 +62,7 @@ func installLocal(writer Writer, binaryPath string) error {
 
 	binPath := config.GetBinariesPath()
 	destDir := filepath.Join(binPath, "local")
-	if err := os.MkdirAll(destDir, 0755); err != nil {
+	if err := os.MkdirAll(destDir, 0o755); err != nil {
 		return fmt.Errorf("creating local plugin directory: %w", err)
 	}
 
@@ -73,7 +73,7 @@ func installLocal(writer Writer, binaryPath string) error {
 	destPath := filepath.Join(destDir, binaryName)
 	// Use atomic write (temp + rename) so a crash mid-copy can't leave a partial
 	// binary that go-plugin would exec — same hazard as the grcstore install path.
-	if err := utils.WriteFileAtomic(destPath, src, 0755); err != nil {
+	if err := utils.WriteFileAtomic(destPath, src, 0o755); err != nil {
 		return fmt.Errorf("writing %s: %w", destPath, err)
 	}
 

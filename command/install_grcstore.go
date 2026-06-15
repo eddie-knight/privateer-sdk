@@ -56,7 +56,6 @@ func installPlugin(ctx context.Context, writer Writer, arg string) error {
 // client for both hub calls.
 func pullVerifyInstall(ctx context.Context, writer Writer, hub *oci.Client, detail *oci.PluginDetail, release *oci.PluginRelease) error {
 	coordinate := detail.Coordinate()
-	fullName := coordinate
 
 	// Resolve the registry host from the configured hub's discovery document
 	// (PVTR_HUB_URL, default grc.store). The registry host is never hardcoded.
@@ -116,7 +115,7 @@ func pullVerifyInstall(ctx context.Context, writer Writer, hub *oci.Client, deta
 	// (the publisher may have legitimately rotated identity and updated the hub)
 	// but still enforce the local pin — the user must explicitly uninstall to
 	// accept a new identity.
-	pin, warn := pinnedIdentityFor(m.Find(fullName), detail.SignerIdentity)
+	pin, warn := pinnedIdentityFor(m.Find(coordinate), detail.SignerIdentity)
 	if warn != "" {
 		_, _ = fmt.Fprintf(writer, "Warning: %s\n", warn)
 	}
@@ -151,7 +150,7 @@ func pullVerifyInstall(ctx context.Context, writer Writer, hub *oci.Client, deta
 	// closed for ANY different plugin — including legacy/local entries, which we
 	// cannot reliably prove are "the same plugin" under a new coordinate — and
 	// tell the user to uninstall first.
-	if err := resolveBinaryCollision(m, binaryName, fullName); err != nil {
+	if err := resolveBinaryCollision(m, binaryName, coordinate); err != nil {
 		return err
 	}
 
@@ -161,7 +160,7 @@ func pullVerifyInstall(ctx context.Context, writer Writer, hub *oci.Client, deta
 
 	// Record provenance for update/re-verify + TOFU (pin on first install).
 	m.Add(manifest.Plugin{
-		Name:           fullName,
+		Name:           coordinate,
 		Version:        verified.Version,
 		BinaryPath:     binaryName,
 		Coordinate:     coordinate,

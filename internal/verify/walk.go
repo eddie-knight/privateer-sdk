@@ -97,9 +97,11 @@ func (v *Verifier) Index(ctx context.Context, fetched *oci.FetchedIndex, policy 
 			continue
 		}
 		// This bundle passed both crypto verification and the identity policy —
-		// proceed to the walk. The policy is also enforced inside walkVerifiedIndex
-		// (step 2) for callers that invoke it directly (harness tests); running it
-		// here first means walk is only reached with a known-good identity.
+		// proceed to the walk. The identity check here is load-bearing, not just a
+		// pre-filter: on a mismatch the loop `continue`s to the NEXT bundle, so a
+		// plugin carrying multiple signatures is accepted as long as one matches the
+		// pinned identity. walkVerifiedIndex re-checks (step 2) so the test entrypoint
+		// that calls it directly is gated identically.
 		return v.walkVerifiedIndex(ctx, fetched, signerIdentity, policy)
 	}
 
