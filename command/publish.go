@@ -195,7 +195,7 @@ func runPublish(ctx context.Context, writer Writer, p publishParams) error {
 	if err != nil {
 		return fmt.Errorf("hub discovery: %w", err)
 	}
-	host2, err := disco.RegistryHost()
+	host, err := disco.RegistryHost()
 	if err != nil {
 		return fmt.Errorf("resolving registry host: %w", err)
 	}
@@ -213,19 +213,19 @@ func runPublish(ctx context.Context, writer Writer, p publishParams) error {
 	// pull-only token, prompt for a sigstore sign-in, and only then fail at the
 	// raw registry push. Detect the denied push from the minted token's scope.
 	if !regToken.GrantsPush() {
-		ns, _, _ := strings.Cut(coordinate, "/")
+		ns, pid, _ := strings.Cut(coordinate, "/")
 		return fmt.Errorf("publishing to %s/%s/%s requires ownership of namespace %q — create or claim it first (e.g. at %s/%s, or POST %s/v1/orgs), then re-publish",
-			ns, oci.ReservedPluginSegment, strings.SplitN(coordinate, "/", 2)[1],
+			ns, oci.ReservedPluginSegment, pid,
 			ns, uiBaseFromHub(disco.HubURL), ns, oci.HubURL())
 	}
 
 	pushOpts := oci.PushOptions{
-		RegistryHost:  host2,
+		RegistryHost:  host,
 		PlainHTTP:     disco.PlainHTTP(),
 		RegistryToken: regToken.Token,
 	}
 
-	_, _ = fmt.Fprintf(writer, "Pushing to %s (hub %s)\n", host2, oci.HubURL())
+	_, _ = fmt.Fprintf(writer, "Pushing to %s (hub %s)\n", host, oci.HubURL())
 	digest, err := oci.Push(ctx, idx, pushOpts)
 	if err != nil {
 		return fmt.Errorf("pushing index: %w", err)

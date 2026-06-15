@@ -58,7 +58,7 @@ func MintRegistryToken(ctx context.Context, hubURL, coordinate, upstreamBearer s
 	if !ok {
 		return RegistryToken{}, fmt.Errorf("invalid coordinate %q for token scope", coordinate)
 	}
-	repo := fmt.Sprintf("%s/%s/%s", ns, ReservedPluginSegment, id)
+	repo := pluginRepoPath(ns, id)
 	q := url.Values{}
 	q.Set("scope", fmt.Sprintf("repository:%s:pull,push", repo))
 	q.Set("service", "zot")
@@ -66,9 +66,9 @@ func MintRegistryToken(ctx context.Context, hubURL, coordinate, upstreamBearer s
 	// Build a temporary hub client targeting the caller-supplied URL.
 	// doJSON is used for the shared transport bounds and consistent error shape;
 	// the bearer is passed as the Authorization header.
-	c := &Client{baseURL: hubURL, httpClient: NewClient().httpClient}
+	c := newHubClient(hubURL, defaultHubTimeout)
 	var tr registrytoken.Response
-	if err := c.doJSON(ctx, "GET", "/v2/token?"+q.Encode(), upstreamBearer, nil, &tr); err != nil {
+	if err := c.doJSON(ctx, http.MethodGet, "/v2/token?"+q.Encode(), upstreamBearer, nil, &tr); err != nil {
 		var statusErr *httpStatusError
 		if errors.As(err, &statusErr) && statusErr.status == http.StatusUnauthorized {
 			return RegistryToken{}, fmt.Errorf("minting registry token: %w — your login may be expired, run `pvtr login`", err)

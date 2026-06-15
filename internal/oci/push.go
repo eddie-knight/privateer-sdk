@@ -107,7 +107,7 @@ func newPluginRepository(opts PushOptions, coordinate string) (*remote.Repositor
 	// the earlier _plugins segment forced that workaround, which the maintainers
 	// changed away from precisely because a leading-underscore segment is
 	// illegal and oras-go re-validates the name inside Resolve/Fetch/Referrers).
-	ref := fmt.Sprintf("%s/%s/%s/%s", opts.RegistryHost, ns, ReservedPluginSegment, id)
+	ref := opts.RegistryHost + "/" + pluginRepoPath(ns, id)
 	repo, err := remote.NewRepository(ref)
 	if err != nil {
 		return nil, fmt.Errorf("building repository client for %s: %w", ref, err)
@@ -132,6 +132,13 @@ func newPluginRepository(opts PushOptions, coordinate string) (*remote.Repositor
 		repo.Client = auth.DefaultClient
 	}
 	return repo, nil
+}
+
+// pluginRepoPath returns the registry repository path "<namespace>/plugins/<id>"
+// the hub uses for a plugin. The hub compares this byte-for-byte, so every caller
+// (token mint, push, sync) must build it through here.
+func pluginRepoPath(ns, id string) string {
+	return ns + "/" + ReservedPluginSegment + "/" + id
 }
 
 // splitCoordinate splits "<namespace>/<plugin_id>" into its parts.

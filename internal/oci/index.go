@@ -1,11 +1,12 @@
 package oci
 
 import (
+	"cmp"
 	"encoding/json"
 	"fmt"
 	"os"
 	"runtime"
-	"sort"
+	"slices"
 	"strings"
 
 	"github.com/opencontainers/go-digest"
@@ -207,19 +208,16 @@ func canonicalEvaluates(in []pluginspec.Evaluate) []pluginspec.Evaluate {
 	}
 	out := make([]pluginspec.Evaluate, len(in))
 	for i, e := range in {
-		reqs := append([]string(nil), e.RequirementIDs...)
-		sort.Strings(reqs)
+		reqs := slices.Clone(e.RequirementIDs)
+		slices.Sort(reqs)
 		out[i] = pluginspec.Evaluate{
 			Catalog:        e.Catalog,
 			CatalogVersion: e.CatalogVersion,
 			RequirementIDs: reqs,
 		}
 	}
-	sort.SliceStable(out, func(i, j int) bool {
-		if out[i].Catalog != out[j].Catalog {
-			return out[i].Catalog < out[j].Catalog
-		}
-		return out[i].CatalogVersion < out[j].CatalogVersion
+	slices.SortStableFunc(out, func(a, b pluginspec.Evaluate) int {
+		return cmp.Or(cmp.Compare(a.Catalog, b.Catalog), cmp.Compare(a.CatalogVersion, b.CatalogVersion))
 	})
 	return out
 }

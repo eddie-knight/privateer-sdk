@@ -31,13 +31,13 @@ func Sync(ctx context.Context, hubURL, coordinate, tag, upstreamBearer string) e
 	// http.Client.Timeout fires independently of the context, so reusing the
 	// 15-second client would silently cap sync at 15s regardless of any context
 	// deadline. The caller's context still propagates via NewRequestWithContext.
-	c := &Client{baseURL: hubURL, httpClient: &http.Client{Timeout: 60 * time.Second}}
+	c := newHubClient(hubURL, 60*time.Second)
 	path := fmt.Sprintf("/v1/plugins/%s/%s/sync", ns, id)
 	body := syncapi.Request{
-		Repository: fmt.Sprintf("%s/%s/%s", ns, ReservedPluginSegment, id),
+		Repository: pluginRepoPath(ns, id),
 		Tag:        tag,
 	}
-	if err := c.doJSON(ctx, "POST", path, upstreamBearer, body, nil); err != nil {
+	if err := c.doJSON(ctx, http.MethodPost, path, upstreamBearer, body, nil); err != nil {
 		// The hub returns actionable JSON errors (plugin_unsigned,
 		// plugin_signer_mismatch, registry_diverged, …); doJSON captures the
 		// response body into the error so they surface verbatim.

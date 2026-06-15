@@ -225,7 +225,11 @@ func postForm(ctx context.Context, endpoint string, form url.Values) (*http.Resp
 }
 
 func credsFromTokenResponse(issuer string, tr *tokenResponse) *Credentials {
-	lifetime := max(time.Duration(tr.ExpiresIn)*time.Second, 30*time.Second)
+	// Floor the lifetime safely above the 60s renewal window (Credentials.Expired)
+	// so a token with a missing/short expires_in is not born already-expired — which
+	// would make the very next BearerToken call refresh a token we just obtained, and
+	// fail outright when there is no refresh token.
+	lifetime := max(time.Duration(tr.ExpiresIn)*time.Second, 90*time.Second)
 	return &Credentials{
 		Issuer:       issuer,
 		AccessToken:  tr.AccessToken,

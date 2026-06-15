@@ -350,13 +350,7 @@ func (v *EvaluationOrchestrator) writeResultsToFile(serviceName string, result [
 		v.config.Logger.Warn("write directory for this plugin created for results, but should have been created when initializing logs", "directory", dir)
 	}
 
-	_, err := os.Create(filepath)
-	if err != nil {
-		v.config.Logger.Error("Error creating file", "filepath", filepath)
-		return err
-	}
-
-	file, err := os.OpenFile(filepath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0640)
+	file, err := os.OpenFile(filepath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o640)
 	if err != nil {
 		v.config.Logger.Error("Error opening file", "filepath", filepath)
 		return err
