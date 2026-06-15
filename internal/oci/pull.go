@@ -10,6 +10,7 @@ import (
 	"time"
 
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
+	"github.com/revanite-io/grc-store-protocol/mediatype"
 	"oras.land/oras-go/v2"
 	"oras.land/oras-go/v2/content"
 	"oras.land/oras-go/v2/registry"
@@ -18,9 +19,9 @@ import (
 )
 
 // BundleMediaType is the artifactType/mediaType of the Sigstore v0.3 bundle
-// stored as an OCI 1.1 referrer of the plugin index. Must match the hub's
-// plugin.BundleMediaType.
-const BundleMediaType = "application/vnd.dev.sigstore.bundle.v0.3+json"
+// stored as an OCI 1.1 referrer of the plugin index — re-exported from the
+// shared protocol contract (single source of truth; ADR-0035).
+const BundleMediaType = mediatype.SigstoreBundle
 
 // maxBlobBytes caps any single fetched blob (manifest, config, bundle). The
 // binary layer is read by the verify walk with its own (larger) cap.

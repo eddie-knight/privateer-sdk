@@ -9,8 +9,8 @@ import (
 
 	"github.com/opencontainers/go-digest"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
-
 	"github.com/privateerproj/privateer-sdk/internal/oci"
+	"github.com/revanite-io/grc-store-protocol/pluginspec"
 )
 
 // Fetch caps for the verify walk. A child manifest/config blob is small; the
@@ -181,7 +181,7 @@ func (v *Verifier) walkVerifiedIndex(ctx context.Context, fetched *oci.FetchedIn
 	if err := checkDigest(child.Config.Digest, configBytes, "config blob"); err != nil {
 		return nil, err
 	}
-	var cfg oci.PluginConfig
+	var cfg pluginspec.Config
 	if err := json.Unmarshal(configBytes, &cfg); err != nil {
 		return nil, fmt.Errorf("%w: parse config blob: %v", ErrMalformedIndex, err)
 	}

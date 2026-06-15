@@ -15,7 +15,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/privateerproj/privateer-sdk/internal/oci"
+	"github.com/revanite-io/grc-store-protocol/identity"
 	"github.com/sigstore/sigstore-go/pkg/bundle"
 	"github.com/sigstore/sigstore-go/pkg/root"
 	sgverify "github.com/sigstore/sigstore-go/pkg/verify"
@@ -143,5 +143,5 @@ func (v *Verifier) runVerify(entity sgverify.SignedEntity, policy sgverify.Polic
 	if cert.Extensions.Issuer == "" || cert.SubjectAlternativeName == "" {
 		return "", fmt.Errorf("%w: verified certificate missing OIDC issuer or SAN", ErrSignatureInvalid)
 	}
-	return oci.CanonicalKeylessIdentity(cert.Extensions.Issuer, cert.SubjectAlternativeName), nil
+	return identity.CanonicalKeylessIdentity(cert.Extensions.Issuer, cert.SubjectAlternativeName), nil
 }

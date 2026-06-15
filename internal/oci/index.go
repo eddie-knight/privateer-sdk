@@ -11,46 +11,28 @@ import (
 	"github.com/opencontainers/go-digest"
 	specs "github.com/opencontainers/image-spec/specs-go"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
-	"github.com/privateerproj/privateer-sdk/pluginkit"
+	"github.com/revanite-io/grc-store-protocol/mediatype"
+	"github.com/revanite-io/grc-store-protocol/pluginspec"
 )
 
-// grc.store plugin media types (ADR-0034 / installer recommendation §3).
+// grc.store plugin media types — re-exported from the shared protocol contract
+// so the wire strings have a single source of truth (grc-store-protocol/mediatype,
+// ADR-0035) instead of a hand-synced copy.
 const (
-	// MediaTypePluginConfig is the per-child config blob media type. It is part
-	// of the signed index, so the installer reads entrypoint/evaluates from it.
-	MediaTypePluginConfig = "application/vnd.grc-store.plugin.config.v1+json"
-	// MediaTypePluginBinary is the single binary layer media type per child.
-	MediaTypePluginBinary = "application/vnd.grc-store.plugin.binary.v1"
+	MediaTypePluginConfig = mediatype.PluginConfig
+	MediaTypePluginBinary = mediatype.PluginBinary
 )
 
 // defaultProtocol is the go-plugin transport. netrpc matches the SDK's
 // hashicorp/go-plugin usage; surfaced in the config blob for the installer.
 const defaultProtocol = "netrpc"
 
-// PluginConfig is the vnd.grc-store.plugin.config.v1+json document, one per
-// child manifest (per platform). It is the SIGNED descriptor of what the bare
-// binary can't self-carry: the entrypoint rename, the protocol, and the
-// in-model `evaluates` linkage. The installer trusts THIS (after verifying the
-// index), not the unsigned hub API.
-type PluginConfig struct {
-	Plugin     string           `json:"plugin"`  // owner/repo, e.g. "ossf/pvtr-github-repo-scanner"
-	Version    string           `json:"version"` // release version
-	Platform   PluginPlatform   `json:"platform"`
-	Entrypoint string           `json:"entrypoint"` // go-plugin discovery name (binary filename)
-	Protocol   string           `json:"protocol"`
-	Evaluates  []EvaluatesEntry `json:"evaluates,omitempty"`
-}
-
-// PluginPlatform is the os/arch a config blob is for.
-type PluginPlatform struct {
-	OS   string `json:"os"`
-	Arch string `json:"arch"`
-}
-
-// EvaluatesEntry is the config blob's evaluates entry. It IS the plugin-
-// declared pluginkit.EvaluatesDeclaration — a true alias, so the signed wire
-// shape and the publish-manifest shape cannot drift.
-type EvaluatesEntry = pluginkit.EvaluatesDeclaration
+// The signed config-blob schema (vnd.grc-store.plugin.config.v1+json) — the
+// descriptor a bare binary can't self-carry (entrypoint rename, protocol,
+// in-model `evaluates` linkage) — is the shared producer↔hub contract type
+// pluginspec.Config (ADR-0035). pvtr writes and signs it; the hub reads it as
+// the authoritative source on sync. We use pluginspec.Config/Platform/Evaluate
+// directly so the wire shape can't drift from the hub's reader.
 
 // blob is an assembled, content-addressed in-memory artifact: its bytes, media
 // type, and digest. The push layer (oras) writes these to a registry; keeping
@@ -111,7 +93,7 @@ type AssembleParams struct {
 	Binaries []PlatformBinary
 	// Evaluates is the control-catalog linkage, identical across platforms,
 	// written into every config blob. Optional.
-	Evaluates []EvaluatesEntry
+	Evaluates []pluginspec.Evaluate
 }
 
 // AssembleIndex builds the full OCI image index for a plugin version from the
@@ -158,10 +140,10 @@ func AssembleIndex(p AssembleParams) (*AssembledIndex, error) {
 			binBlobsByPath[b.Path] = binBlob
 		}
 
-		cfg := PluginConfig{
+		cfg := pluginspec.Config{
 			Plugin:     p.Plugin,
 			Version:    p.Version,
-			Platform:   PluginPlatform{OS: b.OS, Arch: b.Arch},
+			Platform:   pluginspec.Platform{OS: b.OS, Arch: b.Arch},
 			Entrypoint: b.Entrypoint,
 			Protocol:   defaultProtocol,
 			Evaluates:  evaluates,
@@ -217,17 +199,17 @@ func AssembleIndex(p AssembleParams) (*AssembledIndex, error) {
 // requirement_ids sorted. The order MUST be stable across children — the hub
 // compares the list byte-identically and order-sensitively, so a non-deterministic
 // order (e.g. a map-derived caller) would make children mismatch. Returns nil for
-// an empty input so the config blob omits the field (omitempty) rather than
-// emitting an empty array.
-func canonicalEvaluates(in []EvaluatesEntry) []EvaluatesEntry {
+// an empty input; valid publishes always carry non-empty evaluates
+// (ValidateForPublish gates empty), so the nil case never reaches a published blob.
+func canonicalEvaluates(in []pluginspec.Evaluate) []pluginspec.Evaluate {
 	if len(in) == 0 {
 		return nil
 	}
-	out := make([]EvaluatesEntry, len(in))
+	out := make([]pluginspec.Evaluate, len(in))
 	for i, e := range in {
 		reqs := append([]string(nil), e.RequirementIDs...)
 		sort.Strings(reqs)
-		out[i] = EvaluatesEntry{
+		out[i] = pluginspec.Evaluate{
 			Catalog:        e.Catalog,
 			CatalogVersion: e.CatalogVersion,
 			RequirementIDs: reqs,

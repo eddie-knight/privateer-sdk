@@ -3,6 +3,8 @@ package oci
 import (
 	"strings"
 	"testing"
+
+	"github.com/revanite-io/grc-store-protocol/pluginspec"
 )
 
 func TestValidateForPublish_RejectsEmptyEvaluates(t *testing.T) {
@@ -26,7 +28,7 @@ func TestValidateForPublish_AcceptsWellFormed(t *testing.T) {
 		Coordinate: "sandbox/hello",
 		Version:    "0.1.0",
 		Binaries:   []PlatformBinary{{OS: "linux", Arch: "amd64", Path: "/x", Entrypoint: "hello"}},
-		Evaluates:  []EvaluatesEntry{{Catalog: "sandbox/example", CatalogVersion: "2026.01", RequirementIDs: []string{"SBX.1"}}},
+		Evaluates:  []pluginspec.Evaluate{{Catalog: "sandbox/example", CatalogVersion: "2026.01", RequirementIDs: []string{"SBX.1"}}},
 	}
 	if err := ValidateForPublish(p); err != nil {
 		t.Fatalf("well-formed plugin should pass preflight: %v", err)
@@ -39,7 +41,7 @@ func TestValidateForPublish_RejectsBadFields(t *testing.T) {
 			Coordinate: "sandbox/hello",
 			Version:    "0.1.0",
 			Binaries:   []PlatformBinary{{OS: "linux", Arch: "amd64", Path: "/x", Entrypoint: "hello"}},
-			Evaluates:  []EvaluatesEntry{{Catalog: "sandbox/example", CatalogVersion: "2026.01", RequirementIDs: []string{"SBX.1"}}},
+			Evaluates:  []pluginspec.Evaluate{{Catalog: "sandbox/example", CatalogVersion: "2026.01", RequirementIDs: []string{"SBX.1"}}},
 		}
 	}
 	t.Run("non-namespaced catalog", func(t *testing.T) {

@@ -13,6 +13,7 @@ import (
 	"github.com/privateerproj/privateer-sdk/internal/auth"
 	"github.com/privateerproj/privateer-sdk/internal/oci"
 	"github.com/privateerproj/privateer-sdk/pluginkit"
+	"github.com/revanite-io/grc-store-protocol/pluginspec"
 	"github.com/spf13/cobra"
 )
 
@@ -124,12 +125,25 @@ func runPublish(ctx context.Context, writer Writer, p publishParams) error {
 	}
 	_, _ = fmt.Fprintf(writer, "Loaded %s version %s (%d platforms)\n", coordinate, version, len(bins))
 
+	// Convert the plugin-declared evaluates (the public pluginkit type) into the
+	// shared protocol type at this boundary. Keeping pluginkit.EvaluatesDeclaration
+	// as our own public struct insulates community plugins from grc-store-protocol's
+	// v0.x churn; the fields are identical, so this is a straight copy.
+	evaluates := make([]pluginspec.Evaluate, len(manifest.Evaluates))
+	for i, e := range manifest.Evaluates {
+		evaluates[i] = pluginspec.Evaluate{
+			Catalog:        e.Catalog,
+			CatalogVersion: e.CatalogVersion,
+			RequirementIDs: e.RequirementIDs,
+		}
+	}
+
 	assembleParams := oci.AssembleParams{
 		Coordinate: coordinate,
 		Plugin:     coordinate,
 		Version:    version,
 		Binaries:   bins,
-		Evaluates:  manifest.Evaluates,
+		Evaluates:  evaluates,
 	}
 
 	// A --registry override pushes to a non-hub host for testing; it requires an

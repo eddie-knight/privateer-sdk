@@ -13,13 +13,13 @@ import (
 
 	"github.com/opencontainers/go-digest"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
+	"github.com/privateerproj/privateer-sdk/internal/oci"
+	"github.com/revanite-io/grc-store-protocol/pluginspec"
 	"github.com/sigstore/sigstore-go/pkg/testing/ca"
 	sgverify "github.com/sigstore/sigstore-go/pkg/verify"
 	"oras.land/oras-go/v2"
 	"oras.land/oras-go/v2/content"
 	"oras.land/oras-go/v2/content/memory"
-
-	"github.com/privateerproj/privateer-sdk/internal/oci"
 )
 
 const (
@@ -89,7 +89,7 @@ func assembleAndPush(t *testing.T, bins []oci.PlatformBinary) *builtIndex {
 		Plugin:     coord,
 		Version:    version,
 		Binaries:   bins,
-		Evaluates:  []oci.EvaluatesEntry{{Catalog: "ossf/osps.baseline", CatalogVersion: "2025.02", RequirementIDs: []string{"OSPS-AC-01"}}},
+		Evaluates:  []pluginspec.Evaluate{{Catalog: "ossf/osps.baseline", CatalogVersion: "2025.02", RequirementIDs: []string{"OSPS-AC-01"}}},
 	})
 	if err != nil {
 		t.Fatalf("AssembleIndex: %v", err)

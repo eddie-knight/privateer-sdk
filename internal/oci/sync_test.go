@@ -7,11 +7,13 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/revanite-io/grc-store-protocol/syncapi"
 )
 
 func TestSync_RequestShapeAndBearer(t *testing.T) {
 	var gotPath, gotAuth string
-	var gotBody syncRequest
+	var gotBody syncapi.Request
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
 		gotAuth = r.Header.Get("Authorization")

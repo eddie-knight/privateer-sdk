@@ -7,12 +7,13 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/privateerproj/privateer-sdk/internal/oci"
+	"github.com/revanite-io/grc-store-protocol/identity"
+	"github.com/revanite-io/grc-store-protocol/pluginspec"
 	"github.com/sigstore/sigstore-go/pkg/testing/ca"
 	"github.com/sigstore/sigstore-go/pkg/tlog"
 	sgverify "github.com/sigstore/sigstore-go/pkg/verify"
 	"oras.land/oras-go/v2/content/memory"
-
-	"github.com/privateerproj/privateer-sdk/internal/oci"
 )
 
 // noTlogEntity wraps a SignedEntity but presents NO transparency-log inclusion
@@ -446,7 +447,7 @@ func TestIdentityPolicy_TOFU(t *testing.T) {
 	}
 }
 
-func mustID(issuer, san string) string { return oci.CanonicalKeylessIdentity(issuer, san) }
+func mustID(issuer, san string) string { return identity.CanonicalKeylessIdentity(issuer, san) }
 
 // buildIndexWithPluginMismatch assembles an index whose config blob's "plugin"
 // field ("evil/other") differs from the coordinate stored in FetchedIndex
@@ -469,7 +470,7 @@ func buildIndexWithPluginMismatch(t *testing.T) *builtIndex {
 			{OS: runtime.GOOS, Arch: runtime.GOARCH, Path: hostBin, Entrypoint: "github-repo"},
 			{OS: "plan9", Arch: "mips", Path: otherBin, Entrypoint: "github-repo"},
 		},
-		Evaluates: []oci.EvaluatesEntry{{Catalog: "ossf/osps.baseline", CatalogVersion: "2025.02", RequirementIDs: []string{"OSPS-AC-01"}}},
+		Evaluates: []pluginspec.Evaluate{{Catalog: "ossf/osps.baseline", CatalogVersion: "2025.02", RequirementIDs: []string{"OSPS-AC-01"}}},
 	})
 	if err != nil {
 		t.Fatalf("AssembleIndex: %v", err)

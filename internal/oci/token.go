@@ -10,21 +10,16 @@ import (
 	"net/url"
 	"slices"
 	"strings"
+
+	"github.com/revanite-io/grc-store-protocol/registrytoken"
 )
 
-// tokenResponse is the hub's GET /v2/token reply (Docker token-auth scheme,
-// ADR-0031). The hub authenticates the request's Authorization: Bearer
-// <upstream> (Keycloak device-grant or GHA-OIDC), then mints a registry token
-// scoped to what that principal may push.
-type tokenResponse struct {
-	Token       string `json:"token"`
-	AccessToken string `json:"access_token"` // some servers use this field instead
-}
-
-// accessEntry mirrors the hub's registrytoken.AccessEntry — one Distribution
-// resource-scope grant in the minted token's JWT `access` claim. We decode it to
-// learn which actions (pull/push) the hub actually granted, since the hub grants
-// pull-only (NOT an error) when the caller doesn't own the namespace.
+// accessEntry is one Distribution resource-scope grant in the minted token's JWT
+// `access` claim. We decode it to learn which actions (pull/push) the hub actually
+// granted, since the hub grants pull-only (NOT an error) when the caller doesn't
+// own the namespace. This is a local JWT-decoding detail — NOT part of the shared
+// grc-store-protocol contract (registrytoken there models only the /v2/token
+// response, not the embedded JWT claim).
 type accessEntry struct {
 	Type    string   `json:"type"`
 	Name    string   `json:"name"`
@@ -72,7 +67,7 @@ func MintRegistryToken(ctx context.Context, hubURL, coordinate, upstreamBearer s
 	// doJSON is used for the shared transport bounds and consistent error shape;
 	// the bearer is passed as the Authorization header.
 	c := &Client{baseURL: hubURL, httpClient: NewClient().httpClient}
-	var tr tokenResponse
+	var tr registrytoken.Response
 	if err := c.doJSON(ctx, "GET", "/v2/token?"+q.Encode(), upstreamBearer, nil, &tr); err != nil {
 		var statusErr *httpStatusError
 		if errors.As(err, &statusErr) && statusErr.status == http.StatusUnauthorized {
@@ -80,10 +75,7 @@ func MintRegistryToken(ctx context.Context, hubURL, coordinate, upstreamBearer s
 		}
 		return RegistryToken{}, fmt.Errorf("minting registry token: %w", err)
 	}
-	tok := tr.Token
-	if tok == "" {
-		tok = tr.AccessToken
-	}
+	tok := tr.BearerToken()
 	if tok == "" {
 		return RegistryToken{}, fmt.Errorf("token response carried no token")
 	}

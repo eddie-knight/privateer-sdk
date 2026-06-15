@@ -8,6 +8,7 @@ import (
 
 	specs "github.com/opencontainers/image-spec/specs-go"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
+	"github.com/revanite-io/grc-store-protocol/pluginspec"
 )
 
 // writeBinary writes fake binary bytes and returns the path.
@@ -26,7 +27,7 @@ func baseParams(bins []PlatformBinary) AssembleParams {
 		Plugin:     "ossf/pvtr-github-repo-scanner",
 		Version:    "1.4.0",
 		Binaries:   bins,
-		Evaluates: []EvaluatesEntry{
+		Evaluates: []pluginspec.Evaluate{
 			{Catalog: "ossf/osps.baseline", CatalogVersion: "2025.02", RequirementIDs: []string{"OSPS-AC-01"}},
 		},
 	}
@@ -66,7 +67,7 @@ func TestAssembleIndex_LinuxAndDarwinUniversal(t *testing.T) {
 		if err := json.Unmarshal(child.Data, &m); err != nil {
 			t.Fatalf("unmarshal child: %v", err)
 		}
-		var cfg PluginConfig
+		var cfg pluginspec.Config
 		// find this child's config blob and decode it
 		for _, b := range idx.Blobs {
 			if b.Digest == m.Config.Digest {
@@ -112,7 +113,7 @@ func TestAssembleIndex_ConfigBlobContent(t *testing.T) {
 		t.Fatalf("AssembleIndex: %v", err)
 	}
 
-	var cfg PluginConfig
+	var cfg pluginspec.Config
 	for _, b := range idx.Blobs {
 		if b.MediaType == MediaTypePluginConfig {
 			if err := json.Unmarshal(b.Data, &cfg); err != nil {
@@ -317,7 +318,7 @@ func TestConformance_ConfigByteIdenticalAcrossChildrenAndDeterministicEvaluates(
 	})
 	// Deliberately UNSORTED evaluates with unsorted requirement_ids to prove
 	// canonicalization makes children agree.
-	p.Evaluates = []EvaluatesEntry{
+	p.Evaluates = []pluginspec.Evaluate{
 		{Catalog: "z/last", CatalogVersion: "2025.01", RequirementIDs: []string{"R2", "R1"}},
 		{Catalog: "a/first", CatalogVersion: "2025.02", RequirementIDs: []string{"Z", "A"}},
 	}
@@ -334,14 +335,14 @@ func TestConformance_ConfigByteIdenticalAcrossChildrenAndDeterministicEvaluates(
 		Version    string
 		Entrypoint string
 		Protocol   string
-		Evaluates  []EvaluatesEntry
+		Evaluates  []pluginspec.Evaluate
 	}
 	var seen []stable
 	for _, blob := range idx.Blobs {
 		if blob.MediaType != MediaTypePluginConfig {
 			continue
 		}
-		var cfg PluginConfig
+		var cfg pluginspec.Config
 		if err := json.Unmarshal(blob.Data, &cfg); err != nil {
 			t.Fatal(err)
 		}
@@ -379,7 +380,7 @@ func TestConformance_ConfigVersionEqualsTag(t *testing.T) {
 		if blob.MediaType != MediaTypePluginConfig {
 			continue
 		}
-		var cfg PluginConfig
+		var cfg pluginspec.Config
 		if err := json.Unmarshal(blob.Data, &cfg); err != nil {
 			t.Fatal(err)
 		}

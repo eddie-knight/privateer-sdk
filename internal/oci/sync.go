@@ -5,15 +5,9 @@ import (
 	"fmt"
 	"net/http"
 	"time"
-)
 
-// syncRequest is the POST /v1/plugins/{ns}/{id}/sync body. The repository must
-// be the plugins-shape and agree with the URL coordinate (the hub rejects a
-// body that disagrees).
-type syncRequest struct {
-	Repository string `json:"repository"`
-	Tag        string `json:"tag"`
-}
+	"github.com/revanite-io/grc-store-protocol/syncapi"
+)
 
 // Sync tells the hub to ingest a pushed plugin index: it re-fetches the index
 // from its own registry, verifies the signature against its embedded trusted
@@ -39,7 +33,7 @@ func Sync(ctx context.Context, hubURL, coordinate, tag, upstreamBearer string) e
 	// deadline. The caller's context still propagates via NewRequestWithContext.
 	c := &Client{baseURL: hubURL, httpClient: &http.Client{Timeout: 60 * time.Second}}
 	path := fmt.Sprintf("/v1/plugins/%s/%s/sync", ns, id)
-	body := syncRequest{
+	body := syncapi.Request{
 		Repository: fmt.Sprintf("%s/%s/%s", ns, ReservedPluginSegment, id),
 		Tag:        tag,
 	}
