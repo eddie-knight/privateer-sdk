@@ -21,8 +21,8 @@ func Local(w io.Writer, binaryPath string) error {
 		return err
 	}
 
-	binPath := config.GetBinariesPath()
-	destDir := filepath.Join(binPath, "local")
+	binDirPath := config.GetBinariesPath()
+	destDir := filepath.Join(binDirPath, "local")
 
 	err = os.MkdirAll(destDir, 0o755)
 	if err != nil {
@@ -30,24 +30,15 @@ func Local(w io.Writer, binaryPath string) error {
 	}
 
 	err = moveFileWithCrashProtection(binaryPath, destDir, binaryName)
-
-	m, err := manifest.Load(binPath)
 	if err != nil {
-		return fmt.Errorf("loading plugin manifest: %w", err)
+		return err
 	}
 
-	manifestBinaryPath := filepath.Join("local", binaryName)
-	m.Add(manifest.Plugin{
-		Name:       "local/" + binaryName,
-		Version:    "local",
-		BinaryPath: manifestBinaryPath,
-	})
-	if err := m.Save(binPath); err != nil {
-		return fmt.Errorf("saving plugin manifest: %w", err)
+	err = saveManifestInMem(binDirPath, binaryName)
+	if err == nil {
+		_, _ = fmt.Fprintf(w, "Installed local plugin %s\n", binaryName)
 	}
-
-	_, _ = fmt.Fprintf(w, "Installed local plugin %s\n", binaryName)
-	return nil
+	return err
 }
 
 func getSourceName(binaryPath string) (string, error) {
@@ -79,6 +70,24 @@ func moveFileWithCrashProtection(binaryPath, destDir, binaryName string) error {
 	err = utils.WriteFileAtomic(destPath, src, 0o755)
 	if err != nil {
 		return fmt.Errorf("writing %s: %w", destPath, err)
+	}
+	return nil
+}
+
+func saveManifestInMem(binDirPath, binaryName string) error {
+	m, err := manifest.Load(binDirPath)
+	if err != nil {
+		return fmt.Errorf("loading plugin manifest: %w", err)
+	}
+
+	manifestBinaryPath := filepath.Join("local", binaryName)
+	m.Add(manifest.Plugin{
+		Name:       "local/" + binaryName,
+		Version:    "local",
+		BinaryPath: manifestBinaryPath,
+	})
+	if err := m.Save(binDirPath); err != nil {
+		return fmt.Errorf("saving plugin manifest: %w", err)
 	}
 	return nil
 }
