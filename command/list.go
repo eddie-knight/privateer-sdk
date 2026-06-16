@@ -97,7 +97,7 @@ func renderInstallableList(writer io.Writer, remote, local []*PluginPkg, hubURL 
 }
 
 func writePluginDetails(ctx context.Context, writer Writer) {
-	_, _ = fmt.Fprintln(writer, "| Plugin \t | Installed \t| In Current Config \t|")
+	_, _ = fmt.Fprintln(writer, "| Plugin \t | Version \t | Installed \t| In Current Config \t|")
 	var plugins []*PluginPkg
 
 	if viper.GetBool("installed") {
@@ -109,22 +109,31 @@ func writePluginDetails(ctx context.Context, writer Writer) {
 		plugins = GetPlugins()
 	}
 	for _, pluginPkg := range plugins {
-		_, _ = fmt.Fprintf(writer, "| %s \t | %t \t| %t \t|\n", pluginPkg.Name, pluginPkg.Installed, pluginPkg.Requested)
+		version := pluginPkg.Version
+		if version == "" {
+			version = "-" // unpinned (latest) or not installed
+		}
+		_, _ = fmt.Fprintf(writer, "| %s \t | %s \t | %t \t| %t \t|\n", pluginPkg.Name, version, pluginPkg.Installed, pluginPkg.Requested)
 	}
 }
 
-// getRequestedPlugins returns a deduplicated list of plugin names requested in the config.
+// getRequestedPlugins returns the plugins requested in the config, deduplicated
+// by name+version so two services pinning different versions of the same plugin
+// each materialize (while two services sharing the same plugin+version collapse
+// to one entry).
 func getRequestedPlugins() []*PluginPkg {
 	services := config.GetServices()
 	seen := make(map[string]bool)
 	var out []*PluginPkg
 	for serviceName := range services {
 		pluginName := config.GetServicePlugin(serviceName)
-		if seen[pluginName] {
+		version := config.GetServiceVersion(serviceName)
+		dedupKey := pluginName + "@" + version
+		if seen[dedupKey] {
 			continue
 		}
-		seen[pluginName] = true
-		pluginPkg := NewPluginPkg(pluginName, serviceName)
+		seen[dedupKey] = true
+		pluginPkg := NewPluginPkg(pluginName, version, serviceName)
 		pluginPkg.Requested = true
 		out = append(out, pluginPkg)
 	}
@@ -142,6 +151,7 @@ func getLocalPlugins() []*PluginPkg {
 	for _, p := range m.Plugins {
 		pkg := &PluginPkg{
 			Name:      p.Name,
+			Version:   p.Version,
 			Path:      filepath.Join(binPath, p.BinaryPath),
 			Installed: true,
 		}
@@ -153,18 +163,15 @@ func getLocalPlugins() []*PluginPkg {
 
 // GetPlugins returns a combined list of all plugins (requested and local).
 // Used by Run to determine which plugins to execute.
+//
+// Requested plugins already carry their resolved binary path and Installed state
+// from NewPluginPkg (which consults the manifest by name+version), so they are
+// taken as-is. Installed plugins not requested in the config are then appended
+// for visibility in `list`.
 func GetPlugins() []*PluginPkg {
 	output := make([]*PluginPkg, 0)
-	localPlugins := getLocalPlugins()
-	for _, plugin := range getRequestedPlugins() {
-		if local := findPlugin(localPlugins, plugin.Name); local != nil {
-			plugin.Installed = true
-			plugin.Path = local.Path
-			plugin.queueCmd()
-		}
-		output = append(output, plugin)
-	}
-	for _, plugin := range localPlugins {
+	output = append(output, getRequestedPlugins()...)
+	for _, plugin := range getLocalPlugins() {
 		if !Contains(output, plugin.Name) {
 			output = append(output, plugin)
 		}

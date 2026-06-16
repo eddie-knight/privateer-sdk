@@ -10,9 +10,9 @@ import (
 	"strings"
 )
 
-// validNameSegment bounds a namespace, plugin id, or binary filename to a safe,
+// validNameSegmentRegex bounds a namespace, plugin id, or binary filename to a safe,
 // path-component-valid shape.
-var validNameSegment = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]*$`)
+var validNameSegmentRegex = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]*$`)
 
 // parseCoordinate splits a "<namespace>/<plugin_id>[@<version>]" argument.
 // grc.store has no default namespace, so a bare name (no '/') is an error with
@@ -30,10 +30,10 @@ func parseCoordinate(arg string) (coordinate, version string, err error) {
 	if !ok {
 		return "", "", fmt.Errorf("%q is not a grc.store coordinate — use <namespace>/<plugin_id> (e.g. ossf/pvtr-github-repo)", coord)
 	}
-	if !validNameSegment.MatchString(ns) {
+	if !validNameSegmentRegex.MatchString(ns) {
 		return "", "", fmt.Errorf("invalid namespace %q", ns)
 	}
-	if !validNameSegment.MatchString(id) {
+	if !validNameSegmentRegex.MatchString(id) {
 		return "", "", fmt.Errorf("invalid plugin id %q", id)
 	}
 	return ns + "/" + id, version, nil

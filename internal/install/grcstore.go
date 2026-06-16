@@ -134,28 +134,29 @@ func pullVerifyInstall(ctx context.Context, w io.Writer, hub *oci.Client, detail
 		return fmt.Errorf("verifying %s:%s: %w", coordinate, release.Version, err)
 	}
 
-	// Write the VERIFIED bytes under the config entrypoint name, reusing the
-	// installer's binaries dir (go-plugin discovery keys on the filename).
+	// Write the VERIFIED bytes under <coordinate>/<version>/<entrypoint> so that
+	// multiple installed versions of the same plugin coexist on disk rather than
+	// overwriting one another. The run-time resolver maps (name, version) to this
+	// path via the manifest, so the entrypoint filename no longer has to be
+	// globally unique.
 	binaryName := verified.Entrypoint
 	if runtime.GOOS == "windows" && !strings.HasSuffix(binaryName, ".exe") {
 		binaryName = binaryName + ".exe"
 	}
-	if !validNameSegment.MatchString(binaryName) {
+	if !validNameSegmentRegex.MatchString(binaryName) {
 		return fmt.Errorf("invalid entrypoint name %q from verified config", binaryName)
 	}
-
-	// Binary collision policy: no other plugin may already claim this binary
-	// filename. The later install would otherwise silently replace the earlier
-	// one's binary, bypassing the victim plugin's recorded manifest pin (the
-	// victim's filename is execed at run time with no re-verification). We fail
-	// closed for ANY different plugin — including legacy/local entries, which we
-	// cannot reliably prove are "the same plugin" under a new coordinate — and
-	// tell the user to uninstall first.
-	if err := resolveBinaryCollision(m, binaryName, coordinate); err != nil {
-		return err
+	// The version becomes a directory name, so reject anything that could escape
+	// the binaries dir. We don't apply validNameSegmentRegex here because valid
+	// semver build metadata ("1.4.0+build") would fail it; a path-separator check
+	// is enough to keep the write inside the per-plugin tree.
+	if verified.Version == "" || verified.Version == "." || verified.Version == ".." ||
+		strings.ContainsAny(verified.Version, `/\`) {
+		return fmt.Errorf("invalid plugin version %q from verified config", verified.Version)
 	}
 
-	if err := writeVerifiedBinary(destDir, binaryName, verified.Binary); err != nil {
+	relPath := filepath.Join(coordinate, verified.Version, binaryName)
+	if err := writeVerifiedBinary(destDir, relPath, verified.Binary); err != nil {
 		return fmt.Errorf("writing plugin binary: %w", err)
 	}
 
@@ -163,7 +164,7 @@ func pullVerifyInstall(ctx context.Context, w io.Writer, hub *oci.Client, detail
 	m.Add(manifest.Plugin{
 		Name:           coordinate,
 		Version:        verified.Version,
-		BinaryPath:     binaryName,
+		BinaryPath:     relPath,
 		Coordinate:     coordinate,
 		IndexDigest:    verified.IndexDigest,
 		SignerIdentity: verified.SignerIdentity,
@@ -202,44 +203,21 @@ func pinnedIdentityFor(existing *manifest.Plugin, hubIdentity string) (pin strin
 	return hubIdentity, ""
 }
 
-// resolveBinaryCollision fails closed if binaryName is already claimed by any
-// OTHER plugin entry. The comparison is case-insensitive: on the default
-// macOS/Windows filesystems a differing-case filename ("github-repo" vs
-// "GitHub-Repo") resolves to the same file on disk, so a case-sensitive check
-// would let an attacker overwrite a victim plugin's binary by varying case.
-// Same plugin (other.Name == fullName) is the reinstall/upgrade path and is
-// always allowed (manifest.Add upserts it in place).
-//
-// Legacy/local entries (empty Coordinate) are NOT auto-migrated here: we can't
-// prove a pre-migration entry under an old name is "the same plugin" as a new
-// coordinate, so silently removing it would let a malicious plugin clobber an
-// unrelated legacy install. The user uninstalls the old entry explicitly.
-func resolveBinaryCollision(m *manifest.Manifest, binaryName, fullName string) error {
-	for i := range m.Plugins {
-		other := &m.Plugins[i]
-		if other.Name == fullName {
-			continue // same plugin: upsert/upgrade in place
-		}
-		if strings.EqualFold(other.BinaryPath, binaryName) {
-			return fmt.Errorf(
-				"binary name %q is already provided by installed plugin %s; "+
-					"refusing to overwrite — uninstall it first if you intend to replace it",
-				binaryName, other.Name,
-			)
-		}
-	}
-	return nil
-}
-
-// writeVerifiedBinary writes the verified bytes into the binaries dir, +x,
+// writeVerifiedBinary writes the verified bytes to {destDir}/{relPath}, +x,
 // atomically (temp + rename) so a crash mid-write can't leave a partial binary
-// that go-plugin would try to exec. The atomic write is delegated to
-// utils.WriteFileAtomic; this function only handles directory creation and
-// path construction.
-func writeVerifiedBinary(destDir, binaryName string, data []byte) error {
-	if err := os.MkdirAll(destDir, 0o755); err != nil {
+// that go-plugin would try to exec. relPath may contain subdirectories (the
+// per-plugin, per-version layout), so the full parent chain is created. The
+// atomic write itself is delegated to utils.WriteFileAtomic.
+//
+// A binary overwrite check is no longer needed here: each (plugin, version)
+// install lands at its own coordinate/version/entrypoint path, so distinct
+// plugins and versions can never resolve to the same file, and the run-time
+// resolver picks the binary by name+version from the manifest rather than by a
+// globally-unique filename.
+func writeVerifiedBinary(destDir, relPath string, data []byte) error {
+	dest := filepath.Join(destDir, relPath)
+	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
 		return fmt.Errorf("creating binaries dir: %w", err)
 	}
-	dest := filepath.Join(destDir, binaryName)
 	return utils.WriteFileAtomic(dest, data, 0o755)
 }

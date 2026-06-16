@@ -53,8 +53,9 @@ func Run(logger hclog.Logger, getPlugins func() []*PluginPkg) (exitCode int) {
 	var runCount int
 	for serviceName := range viper.GetStringMap("services") {
 		servicePluginName := viper.GetString(fmt.Sprintf("services.%s.plugin", serviceName))
+		servicePluginVersion := viper.GetString(fmt.Sprintf("services.%s.version", serviceName))
 		for _, pluginPkg := range plugins {
-			if pluginPkg.Name == servicePluginName {
+			if pluginPkg.Name == servicePluginName && pluginPkg.Version == servicePluginVersion {
 				if !pluginPkg.Installed {
 					logger.Error(fmt.Sprintf("requested plugin that is not installed: %s", pluginPkg.Name))
 					return BadUsage

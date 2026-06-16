@@ -6,6 +6,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+
+	"golang.org/x/mod/semver"
 
 	"github.com/privateerproj/privateer-sdk/utils"
 )
@@ -14,11 +17,9 @@ const filename = "plugins.json"
 
 // Plugin represents an installed plugin entry in the manifest.
 //
-// The first three fields (Name, Version, BinaryPath) are the original schema.
-// Coordinate, IndexDigest, and SignerIdentity were added for grc.store-sourced
+// Coordinate, IndexDigest, and SignerIdentity apply only to grc.store-sourced
 // installs (signed OCI indexes); they are omitempty so manifests written by the
-// GitHub-Releases path stay byte-identical to the old format, and so entries
-// written before this migration load back with these fields zero-valued.
+// GitHub-Releases path don't carry empty grc.store keys.
 type Plugin struct {
 	Name       string `json:"name"`       // full owner/repo form, e.g. "ossf/pvtr-github-repo-scanner"
 	Version    string `json:"version"`    // version installed from registry
@@ -36,9 +37,16 @@ type Plugin struct {
 	SignerIdentity string `json:"signerIdentity,omitempty"`
 }
 
-// Manifest tracks installed plugins.
+// Manifest tracks installed plugins, keyed by "<name>@<version>" so multiple
+// installed versions of the same plugin can coexist.
 type Manifest struct {
-	Plugins []Plugin `json:"plugins"`
+	Plugins map[string]Plugin `json:"plugins"`
+}
+
+// key is the manifest map key for a plugin entry. Keying by name+version (rather
+// than name alone) is what lets two versions of the same plugin coexist.
+func key(name, version string) string {
+	return fmt.Sprintf("%s@%s", name, version)
 }
 
 // Load reads the manifest from {binariesPath}/plugins.json.
@@ -73,43 +81,98 @@ func (m *Manifest) Save(binariesPath string) error {
 	return utils.WriteFileAtomic(dest, data, 0o644)
 }
 
-// Add upserts a plugin entry by name.
+// Add upserts a plugin entry. The entry is keyed by name@version, so adding a
+// new version of an already-installed plugin coexists with the old one, while
+// re-adding an identical name+version replaces it in place.
 func (m *Manifest) Add(p Plugin) {
-	for i, existing := range m.Plugins {
-		if existing.Name == p.Name {
-			m.Plugins[i] = p
-			return
-		}
+	if m.Plugins == nil {
+		m.Plugins = make(map[string]Plugin)
 	}
-	m.Plugins = append(m.Plugins, p)
+	m.Plugins[key(p.Name, p.Version)] = p
 }
 
-// Remove deletes a plugin entry by name.
-func (m *Manifest) Remove(name string) {
-	for i, p := range m.Plugins {
+// RemoveAllVersions deletes every entry for a plugin name, across all installed
+// versions. No-op if the name is not present.
+func (m *Manifest) RemoveAllVersions(name string) {
+	for k, p := range m.Plugins {
 		if p.Name == name {
-			m.Plugins = append(m.Plugins[:i], m.Plugins[i+1:]...)
-			return
+			delete(m.Plugins, k)
 		}
 	}
 }
 
-// Find looks up a plugin by its full owner/repo name.
+// RemoveVersion deletes the entry for one specific name+version, leaving any
+// other installed versions of the same plugin in place. No-op if that exact
+// version is not present.
+func (m *Manifest) RemoveVersion(name, version string) {
+	delete(m.Plugins, key(name, version))
+}
+
+// Find returns the latest installed version of a plugin by its full owner/repo
+// name, or nil if absent. It is a convenience wrapper over Latest for callers
+// that want version-independent data (e.g. the pinned signer identity, which is
+// the same across versions); Latest makes the choice deterministic.
 func (m *Manifest) Find(name string) *Plugin {
-	for i, p := range m.Plugins {
-		if p.Name == name {
-			return &m.Plugins[i]
-		}
+	return m.Latest(name)
+}
+
+// FindVersion returns the entry for an exact name+version, or nil if absent.
+func (m *Manifest) FindVersion(name, version string) *Plugin {
+	if p, ok := m.Plugins[key(name, version)]; ok {
+		return &p
 	}
 	return nil
 }
 
-// FindByBinary looks up a plugin by its binary filename.
-func (m *Manifest) FindByBinary(binaryName string) *Plugin {
-	for i, p := range m.Plugins {
-		if p.BinaryPath == binaryName {
-			return &m.Plugins[i]
+// Latest returns the highest installed version of a plugin by name, or nil if
+// none is installed. Versions are compared as semver (a leading "v" is supplied
+// since manifests store bare versions like "1.4.0"); entries whose versions are
+// not valid semver (e.g. local installs at version "local") fall back to lexical
+// comparison.
+func (m *Manifest) Latest(name string) *Plugin {
+	var best *Plugin
+	for k := range m.Plugins {
+		p := m.Plugins[k]
+		if p.Name != name {
+			continue
+		}
+		if best == nil || compareVersions(p.Version, best.Version) > 0 {
+			entry := p
+			best = &entry
 		}
 	}
-	return nil
+	return best
+}
+
+// FindByBinary returns every entry whose binary entrypoint (the basename of its
+// BinaryPath) matches entrypoint — i.e. all installed version options that share
+// that binary name. The result is empty when none match.
+func (m *Manifest) FindByBinary(entrypoint string) []Plugin {
+	var out []Plugin
+	for k := range m.Plugins {
+		p := m.Plugins[k]
+		if filepath.Base(p.BinaryPath) == entrypoint {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// compareVersions orders two manifest version strings, preferring semver and
+// falling back to lexical order for non-semver values.
+func compareVersions(a, b string) int {
+	av, bv := semverize(a), semverize(b)
+	if semver.IsValid(av) && semver.IsValid(bv) {
+		return semver.Compare(av, bv)
+	}
+	return strings.Compare(a, b)
+}
+
+// semverize prefixes a bare version with "v" so it can be passed to the semver
+// package, which requires the leading "v".
+func semverize(v string) string {
+	if strings.HasPrefix(v, "v") {
+		return v
+	}
+	return "v" + v
 }

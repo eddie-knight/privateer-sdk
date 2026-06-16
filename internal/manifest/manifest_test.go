@@ -7,49 +7,13 @@ import (
 	"testing"
 )
 
-// TestLoad_PreMigrationFixture is the named migration deliverable: it loads a
-// committed manifest written BEFORE the Coordinate/IndexDigest/SignerIdentity
-// fields existed (testdata/pre-migration/plugins.json — a frozen artifact of
-// the old 3-field schema) and asserts the old entries still load intact with
-// the three new fields zero-valued. This pins the "old manifests keep loading"
-// contract so a future change that tightens the struct (e.g. required-field
-// validation) can't silently break reading manifests already on users' disks.
-func TestLoad_PreMigrationFixture(t *testing.T) {
-	m, err := Load(filepath.Join("testdata", "pre-migration"))
-	if err != nil {
-		t.Fatalf("loading pre-migration fixture: %v", err)
-	}
-	if len(m.Plugins) != 2 {
-		t.Fatalf("expected 2 plugins from fixture, got %d", len(m.Plugins))
-	}
-
-	got := m.Plugins[0]
-	if got.Name != "ossf/pvtr-github-repo-scanner" || got.Version != "1.4.0" || got.BinaryPath != "github-repo" {
-		t.Errorf("original fields not preserved: %+v", got)
-	}
-	// The three migration fields must be zero-valued for old entries.
-	for _, p := range m.Plugins {
-		if p.Coordinate != "" {
-			t.Errorf("%s: expected empty Coordinate, got %q", p.Name, p.Coordinate)
-		}
-		if p.IndexDigest != "" {
-			t.Errorf("%s: expected empty IndexDigest, got %q", p.Name, p.IndexDigest)
-		}
-		if p.SignerIdentity != "" {
-			t.Errorf("%s: expected empty SignerIdentity, got %q", p.Name, p.SignerIdentity)
-		}
-	}
-}
-
-// TestSave_OmitsEmptyMigrationFields guards the omitempty contract: re-saving a
+// TestSave_OmitsEmptyGRCStoreFields guards the omitempty contract: saving a
 // plugin that carries no grc.store provenance must not inject coordinate/
-// indexDigest/signerIdentity keys, so GitHub-Releases-sourced manifests stay
-// byte-compatible with the pre-migration format.
-func TestSave_OmitsEmptyMigrationFields(t *testing.T) {
+// indexDigest/signerIdentity keys.
+func TestSave_OmitsEmptyGRCStoreFields(t *testing.T) {
 	dir := t.TempDir()
-	m := &Manifest{Plugins: []Plugin{
-		{Name: "ossf/pvtr-github-repo-scanner", Version: "1.4.0", BinaryPath: "github-repo"},
-	}}
+	m := &Manifest{}
+	m.Add(Plugin{Name: "ossf/pvtr-github-repo-scanner", Version: "1.4.0", BinaryPath: "github-repo"})
 	if err := m.Save(dir); err != nil {
 		t.Fatalf("Save error: %v", err)
 	}
@@ -57,9 +21,9 @@ func TestSave_OmitsEmptyMigrationFields(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reading saved manifest: %v", err)
 	}
-	for _, key := range [][]byte{[]byte("coordinate"), []byte("indexDigest"), []byte("signerIdentity")} {
-		if bytes.Contains(data, key) {
-			t.Errorf("saved manifest unexpectedly contains %q key:\n%s", key, data)
+	for _, k := range [][]byte{[]byte("coordinate"), []byte("indexDigest"), []byte("signerIdentity")} {
+		if bytes.Contains(data, k) {
+			t.Errorf("saved manifest unexpectedly contains %q key:\n%s", k, data)
 		}
 	}
 }
@@ -76,7 +40,7 @@ func TestLoad_MissingFile(t *testing.T) {
 
 func TestLoad_ValidFile(t *testing.T) {
 	dir := t.TempDir()
-	content := `{"plugins":[{"name":"ossf/pvtr-scanner","version":"1.0.0","binaryPath":"pvtr-scanner"}]}`
+	content := `{"plugins":{"ossf/pvtr-scanner@1.0.0":{"name":"ossf/pvtr-scanner","version":"1.0.0","binaryPath":"pvtr-scanner"}}}`
 	if err := os.WriteFile(filepath.Join(dir, "plugins.json"), []byte(content), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -88,11 +52,12 @@ func TestLoad_ValidFile(t *testing.T) {
 	if len(m.Plugins) != 1 {
 		t.Fatalf("expected 1 plugin, got %d", len(m.Plugins))
 	}
-	if m.Plugins[0].Name != "ossf/pvtr-scanner" {
-		t.Errorf("expected name ossf/pvtr-scanner, got %s", m.Plugins[0].Name)
+	p := m.Find("ossf/pvtr-scanner")
+	if p == nil {
+		t.Fatal("expected to find ossf/pvtr-scanner, got nil")
 	}
-	if m.Plugins[0].Version != "1.0.0" {
-		t.Errorf("expected version 1.0.0, got %s", m.Plugins[0].Version)
+	if p.Version != "1.0.0" {
+		t.Errorf("expected version 1.0.0, got %s", p.Version)
 	}
 }
 
@@ -110,12 +75,9 @@ func TestLoad_CorruptFile(t *testing.T) {
 
 func TestSaveAndLoad(t *testing.T) {
 	dir := t.TempDir()
-	m := &Manifest{
-		Plugins: []Plugin{
-			{Name: "ossf/pvtr-scanner", Version: "1.0.0", BinaryPath: "pvtr-scanner"},
-			{Name: "privateerproj/pvtr-example", Version: "2.0.0", BinaryPath: "pvtr-example"},
-		},
-	}
+	m := &Manifest{}
+	m.Add(Plugin{Name: "ossf/pvtr-scanner", Version: "1.0.0", BinaryPath: "pvtr-scanner"})
+	m.Add(Plugin{Name: "privateerproj/pvtr-example", Version: "2.0.0", BinaryPath: "pvtr-example"})
 
 	if err := m.Save(dir); err != nil {
 		t.Fatalf("Save error: %v", err)
@@ -128,11 +90,11 @@ func TestSaveAndLoad(t *testing.T) {
 	if len(loaded.Plugins) != 2 {
 		t.Fatalf("expected 2 plugins, got %d", len(loaded.Plugins))
 	}
-	if loaded.Plugins[0].Name != "ossf/pvtr-scanner" {
-		t.Errorf("plugin 0: expected ossf/pvtr-scanner, got %s", loaded.Plugins[0].Name)
+	if p := loaded.Find("ossf/pvtr-scanner"); p == nil || p.Version != "1.0.0" {
+		t.Errorf("ossf/pvtr-scanner not preserved: %+v", p)
 	}
-	if loaded.Plugins[1].Name != "privateerproj/pvtr-example" {
-		t.Errorf("plugin 1: expected privateerproj/pvtr-example, got %s", loaded.Plugins[1].Name)
+	if p := loaded.Find("privateerproj/pvtr-example"); p == nil || p.Version != "2.0.0" {
+		t.Errorf("privateerproj/pvtr-example not preserved: %+v", p)
 	}
 }
 
@@ -143,70 +105,120 @@ func TestAdd_Insert(t *testing.T) {
 	if len(m.Plugins) != 1 {
 		t.Fatalf("expected 1 plugin, got %d", len(m.Plugins))
 	}
-	if m.Plugins[0].Version != "1.0.0" {
-		t.Errorf("expected version 1.0.0, got %s", m.Plugins[0].Version)
+	if p := m.Find("ossf/pvtr-scanner"); p == nil || p.Version != "1.0.0" {
+		t.Errorf("expected version 1.0.0, got %+v", p)
 	}
 }
 
+// TestAdd_Upsert: re-adding the same name+version replaces in place.
 func TestAdd_Upsert(t *testing.T) {
-	m := &Manifest{
-		Plugins: []Plugin{
-			{Name: "ossf/pvtr-scanner", Version: "1.0.0", BinaryPath: "pvtr-scanner"},
-		},
-	}
-	m.Add(Plugin{Name: "ossf/pvtr-scanner", Version: "2.0.0", BinaryPath: "pvtr-scanner"})
+	m := &Manifest{}
+	m.Add(Plugin{Name: "ossf/pvtr-scanner", Version: "1.0.0", BinaryPath: "pvtr-scanner"})
+	m.Add(Plugin{Name: "ossf/pvtr-scanner", Version: "1.0.0", BinaryPath: "renamed"})
 
 	if len(m.Plugins) != 1 {
-		t.Fatalf("expected 1 plugin after upsert, got %d", len(m.Plugins))
+		t.Fatalf("expected 1 plugin after same-version re-add, got %d", len(m.Plugins))
 	}
-	if m.Plugins[0].Version != "2.0.0" {
-		t.Errorf("expected version 2.0.0 after upsert, got %s", m.Plugins[0].Version)
+	if p := m.Find("ossf/pvtr-scanner"); p == nil || p.BinaryPath != "renamed" {
+		t.Errorf("expected BinaryPath updated to 'renamed', got %+v", p)
 	}
 }
 
-func TestRemove(t *testing.T) {
-	m := &Manifest{
-		Plugins: []Plugin{
-			{Name: "ossf/pvtr-scanner", Version: "1.0.0", BinaryPath: "pvtr-scanner"},
-			{Name: "privateerproj/pvtr-example", Version: "2.0.0", BinaryPath: "pvtr-example"},
-		},
+// TestAdd_MultipleVersions: adding a new version of an installed plugin keeps
+// both entries — the reason Plugins is keyed by name@version.
+func TestAdd_MultipleVersions(t *testing.T) {
+	m := &Manifest{}
+	m.Add(Plugin{Name: "ossf/pvtr-scanner", Version: "1.0.0", BinaryPath: "pvtr-scanner"})
+	m.Add(Plugin{Name: "ossf/pvtr-scanner", Version: "2.0.0", BinaryPath: "pvtr-scanner"})
+
+	if len(m.Plugins) != 2 {
+		t.Fatalf("expected 2 coexisting versions, got %d", len(m.Plugins))
 	}
-	m.Remove("ossf/pvtr-scanner")
+	if _, ok := m.Plugins["ossf/pvtr-scanner@1.0.0"]; !ok {
+		t.Error("expected v1.0.0 entry to remain")
+	}
+	if _, ok := m.Plugins["ossf/pvtr-scanner@2.0.0"]; !ok {
+		t.Error("expected v2.0.0 entry to be added")
+	}
+}
+
+func TestRemoveAllVersions(t *testing.T) {
+	m := &Manifest{}
+	m.Add(Plugin{Name: "ossf/pvtr-scanner", Version: "1.0.0", BinaryPath: "pvtr-scanner"})
+	m.Add(Plugin{Name: "privateerproj/pvtr-example", Version: "2.0.0", BinaryPath: "pvtr-example"})
+	m.RemoveAllVersions("ossf/pvtr-scanner")
 
 	if len(m.Plugins) != 1 {
 		t.Fatalf("expected 1 plugin after remove, got %d", len(m.Plugins))
 	}
-	if m.Plugins[0].Name != "privateerproj/pvtr-example" {
-		t.Errorf("wrong plugin remained: %s", m.Plugins[0].Name)
+	if m.Find("privateerproj/pvtr-example") == nil {
+		t.Error("wrong plugin removed: privateerproj/pvtr-example should remain")
 	}
 }
 
-func TestRemove_NotFound(t *testing.T) {
-	m := &Manifest{
-		Plugins: []Plugin{
-			{Name: "ossf/pvtr-scanner", Version: "1.0.0", BinaryPath: "pvtr-scanner"},
-		},
+// TestRemoveAllVersions_DropsEveryVersion: removing by name drops all versions.
+func TestRemoveAllVersions_DropsEveryVersion(t *testing.T) {
+	m := &Manifest{}
+	m.Add(Plugin{Name: "ossf/pvtr-scanner", Version: "1.0.0", BinaryPath: "pvtr-scanner"})
+	m.Add(Plugin{Name: "ossf/pvtr-scanner", Version: "2.0.0", BinaryPath: "pvtr-scanner"})
+	m.RemoveAllVersions("ossf/pvtr-scanner")
+
+	if len(m.Plugins) != 0 {
+		t.Fatalf("expected all versions removed, got %d", len(m.Plugins))
 	}
-	m.Remove("nonexistent/plugin")
+}
+
+func TestRemoveAllVersions_NotFound(t *testing.T) {
+	m := &Manifest{}
+	m.Add(Plugin{Name: "ossf/pvtr-scanner", Version: "1.0.0", BinaryPath: "pvtr-scanner"})
+	m.RemoveAllVersions("nonexistent/plugin")
 
 	if len(m.Plugins) != 1 {
 		t.Fatalf("expected 1 plugin unchanged, got %d", len(m.Plugins))
 	}
 }
 
-func TestFind(t *testing.T) {
-	m := &Manifest{
-		Plugins: []Plugin{
-			{Name: "ossf/pvtr-scanner", Version: "1.0.0", BinaryPath: "pvtr-scanner"},
-		},
+// TestRemoveVersion removes one version and leaves the plugin's other versions.
+func TestRemoveVersion(t *testing.T) {
+	m := &Manifest{}
+	m.Add(Plugin{Name: "ossf/pvtr-scanner", Version: "1.0.0", BinaryPath: "ossf/pvtr-scanner/1.0.0/pvtr-scanner"})
+	m.Add(Plugin{Name: "ossf/pvtr-scanner", Version: "2.0.0", BinaryPath: "ossf/pvtr-scanner/2.0.0/pvtr-scanner"})
+	m.RemoveVersion("ossf/pvtr-scanner", "1.0.0")
+
+	if len(m.Plugins) != 1 {
+		t.Fatalf("expected 1 remaining version, got %d", len(m.Plugins))
 	}
+	if m.FindVersion("ossf/pvtr-scanner", "1.0.0") != nil {
+		t.Error("v1.0.0 should have been removed")
+	}
+	if m.FindVersion("ossf/pvtr-scanner", "2.0.0") == nil {
+		t.Error("v2.0.0 should remain")
+	}
+}
+
+// TestRemoveVersion_NotFound: removing an absent version is a no-op.
+func TestRemoveVersion_NotFound(t *testing.T) {
+	m := &Manifest{}
+	m.Add(Plugin{Name: "ossf/pvtr-scanner", Version: "1.0.0", BinaryPath: "pvtr-scanner"})
+	m.RemoveVersion("ossf/pvtr-scanner", "9.9.9")
+
+	if len(m.Plugins) != 1 {
+		t.Fatalf("expected 1 plugin unchanged, got %d", len(m.Plugins))
+	}
+}
+
+// TestFind: Find returns the latest installed version (it delegates to Latest).
+func TestFind(t *testing.T) {
+	m := &Manifest{}
+	m.Add(Plugin{Name: "ossf/pvtr-scanner", Version: "1.0.0", BinaryPath: "ossf/pvtr-scanner/1.0.0/pvtr-scanner"})
+	m.Add(Plugin{Name: "ossf/pvtr-scanner", Version: "2.0.0", BinaryPath: "ossf/pvtr-scanner/2.0.0/pvtr-scanner"})
 
 	p := m.Find("ossf/pvtr-scanner")
 	if p == nil {
 		t.Fatal("expected to find plugin, got nil")
 	}
-	if p.Version != "1.0.0" {
-		t.Errorf("expected version 1.0.0, got %s", p.Version)
+	if p.Version != "2.0.0" {
+		t.Errorf("expected latest version 2.0.0, got %s", p.Version)
 	}
 
 	if m.Find("nonexistent") != nil {
@@ -214,22 +226,59 @@ func TestFind(t *testing.T) {
 	}
 }
 
+// TestLatest covers semver ordering and the non-semver lexical fallback.
+func TestLatest(t *testing.T) {
+	m := &Manifest{}
+	m.Add(Plugin{Name: "ossf/pvtr-scanner", Version: "1.9.0", BinaryPath: "a"})
+	m.Add(Plugin{Name: "ossf/pvtr-scanner", Version: "1.10.0", BinaryPath: "b"}) // semver: 1.10 > 1.9
+	m.Add(Plugin{Name: "ossf/pvtr-scanner", Version: "1.2.0", BinaryPath: "c"})
+
+	if got := m.Latest("ossf/pvtr-scanner"); got == nil || got.Version != "1.10.0" {
+		t.Errorf("expected latest 1.10.0 (semver, not lexical), got %+v", got)
+	}
+	if m.Latest("nonexistent") != nil {
+		t.Error("expected nil latest for nonexistent plugin")
+	}
+
+	// Non-semver versions (e.g. local) fall back to lexical comparison.
+	local := &Manifest{}
+	local.Add(Plugin{Name: "local/x", Version: "local", BinaryPath: "local/x"})
+	if got := local.Latest("local/x"); got == nil || got.Version != "local" {
+		t.Errorf("expected the sole local entry, got %+v", got)
+	}
+}
+
+func TestFindVersion(t *testing.T) {
+	m := &Manifest{}
+	m.Add(Plugin{Name: "ossf/pvtr-scanner", Version: "1.0.0", BinaryPath: "ossf/pvtr-scanner/1.0.0/pvtr-scanner"})
+	m.Add(Plugin{Name: "ossf/pvtr-scanner", Version: "2.0.0", BinaryPath: "ossf/pvtr-scanner/2.0.0/pvtr-scanner"})
+
+	if p := m.FindVersion("ossf/pvtr-scanner", "1.0.0"); p == nil || p.BinaryPath != "ossf/pvtr-scanner/1.0.0/pvtr-scanner" {
+		t.Errorf("expected v1.0.0 entry, got %+v", p)
+	}
+	if m.FindVersion("ossf/pvtr-scanner", "9.9.9") != nil {
+		t.Error("expected nil for an uninstalled version")
+	}
+}
+
+// TestFindByBinary returns every installed version sharing a binary entrypoint
+// (the basename of BinaryPath), now that versions live in per-version subdirs.
 func TestFindByBinary(t *testing.T) {
-	m := &Manifest{
-		Plugins: []Plugin{
-			{Name: "ossf/pvtr-scanner", Version: "1.0.0", BinaryPath: "pvtr-scanner"},
-		},
+	m := &Manifest{}
+	m.Add(Plugin{Name: "ossf/pvtr-scanner", Version: "1.0.0", BinaryPath: "ossf/pvtr-scanner/1.0.0/pvtr-scanner"})
+	m.Add(Plugin{Name: "ossf/pvtr-scanner", Version: "2.0.0", BinaryPath: "ossf/pvtr-scanner/2.0.0/pvtr-scanner"})
+
+	got := m.FindByBinary("pvtr-scanner")
+	if len(got) != 2 {
+		t.Fatalf("expected 2 version options sharing the entrypoint, got %d", len(got))
+	}
+	for _, p := range got {
+		if p.Name != "ossf/pvtr-scanner" {
+			t.Errorf("expected name ossf/pvtr-scanner, got %s", p.Name)
+		}
 	}
 
-	p := m.FindByBinary("pvtr-scanner")
-	if p == nil {
-		t.Fatal("expected to find plugin, got nil")
-	}
-	if p.Name != "ossf/pvtr-scanner" {
-		t.Errorf("expected name ossf/pvtr-scanner, got %s", p.Name)
-	}
-
-	if m.FindByBinary("nonexistent") != nil {
-		t.Error("expected nil for nonexistent binary")
+	if len(m.FindByBinary("nonexistent")) != 0 {
+		t.Error("expected empty result for nonexistent binary")
 	}
 }

@@ -24,6 +24,13 @@ func GetServicePlugin(serviceName string) string {
 	return viper.GetString("services." + serviceName + ".plugin")
 }
 
+// GetServiceVersion returns the optional pinned plugin version for the given
+// service. An empty string means "use the latest installed version".
+// It reads from the same viper state as NewConfig (e.g. after command.ReadConfig()).
+func GetServiceVersion(serviceName string) string {
+	return viper.GetString("services." + serviceName + ".version")
+}
+
 // GetVar retrieves the value associated with the given key from the Config's Vars map.
 // It returns the value as an interface{} and a string representing the type of the value.
 // Useful for debugging in the event that a value is not being retrieved as expected.
