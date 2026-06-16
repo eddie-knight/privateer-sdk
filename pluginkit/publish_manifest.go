@@ -6,6 +6,14 @@ import (
 	"strings"
 )
 
+// PublishManifestCommand is the plugin subcommand that emits the grc.store
+// publish manifest as JSON. command.NewPluginCommands wires it onto every
+// plugin, and `pvtr publish` execs it on the built binary to read the plugin's
+// coordinate and evaluated catalogs — rather than taking them as flags a
+// non-owner could forge. Shared here so the producer (publish) and the plugin
+// command that emits it can't drift on the name.
+const PublishManifestCommand = "publish-manifest"
+
 // PublishManifest is the machine-readable descriptor `pvtr publish` reads from a
 // built plugin (via the publish-manifest subcommand) in place of CLI flags. The
 // plugin coordinate is Publisher + PluginName. Each evaluated catalog's

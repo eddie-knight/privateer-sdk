@@ -64,8 +64,8 @@ func TestDebugCommand(t *testing.T) {
 
 func TestPublishManifestCommand(t *testing.T) {
 	cmd := publishManifestCommand()
-	if cmd.Use != PublishManifestCommand {
-		t.Errorf("Expected cmd.Use to be %q, but got %s", PublishManifestCommand, cmd.Use)
+	if cmd.Use != pluginkit.PublishManifestCommand {
+		t.Errorf("Expected cmd.Use to be %q, but got %s", pluginkit.PublishManifestCommand, cmd.Use)
 	}
 	if cmd.RunE == nil {
 		t.Fatal("Expected cmd.RunE to be set")

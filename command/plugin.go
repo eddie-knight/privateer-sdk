@@ -12,12 +12,6 @@ import (
 	"github.com/spf13/viper"
 )
 
-// PublishManifestCommand is the plugin subcommand that emits the grc.store
-// publish manifest as JSON. `pvtr publish` invokes it on the built binary to
-// learn the plugin's coordinate and evaluated catalogs, rather than asking the
-// publisher to repeat that data as flags.
-const PublishManifestCommand = "publish-manifest"
-
 // Plugin represents a Privateer plugin instance.
 type Plugin struct{}
 
@@ -88,7 +82,7 @@ func debugCommand() *cobra.Command {
 // publish` execs this on the built binary and parses stdout.
 func publishManifestCommand() *cobra.Command {
 	return &cobra.Command{
-		Use:   PublishManifestCommand,
+		Use:   pluginkit.PublishManifestCommand,
 		Short: "Emit the grc.store publish manifest (coordinate + evaluated catalogs) as JSON.",
 		Long: "Print the machine-readable manifest `pvtr publish` consumes: the plugin's " +
 			"grc.store coordinate and the control catalogs it evaluates. Fails if the plugin " +
