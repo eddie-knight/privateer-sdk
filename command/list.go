@@ -28,17 +28,17 @@ func GetListCmd(writerFn func() Writer) *cobra.Command {
 	listCmd := &cobra.Command{
 		Use:   "list",
 		Short: "Consult the Charts! List all plugins that have been installed.",
-		Run: func(cmd *cobra.Command, args []string) {
+		RunE: func(cmd *cobra.Command, _ []string) error {
 			writer := writerFn()
+			defer func() { _ = writer.Flush() }()
 			if viper.GetBool("installable") {
-				writeInstallablePlugins(writer)
-			} else {
-				writePluginDetails(writer)
+				// The remote list IS the point of --installable, so a hub-fetch
+				// failure is the command's failure — surface it (non-zero exit),
+				// don't print a line and exit 0.
+				return writeInstallablePlugins(cmd.Context(), writer)
 			}
-			err := writer.Flush()
-			if err != nil {
-				log.Printf("Error flushing writer: %v", err)
-			}
+			writePluginDetails(cmd.Context(), writer)
+			return nil
 		},
 	}
 	SetListCmdFlags(listCmd)
@@ -59,14 +59,14 @@ func SetListCmdFlags(cmd *cobra.Command) {
 	cmd.MarkFlagsMutuallyExclusive("all", "installed", "installable")
 }
 
-func writeInstallablePlugins(writer Writer) {
-	remote, err := fetchInstallablePlugins()
+func writeInstallablePlugins(ctx context.Context, writer Writer) error {
+	remote, err := fetchInstallablePlugins(ctx)
 	if err != nil {
-		_, _ = fmt.Fprintf(writer, "Error loading installable plugins: %v\n", err)
-		return
+		return fmt.Errorf("loading installable plugins: %w", err)
 	}
 	local := getLocalPlugins()
 	renderInstallableList(writer, remote, local, oci.HubURL())
+	return nil
 }
 
 // renderInstallableList writes the "Plugins that can be installed:" block.
@@ -96,7 +96,7 @@ func renderInstallableList(writer io.Writer, remote, local []*PluginPkg, hubURL 
 	}
 }
 
-func writePluginDetails(writer Writer) {
+func writePluginDetails(ctx context.Context, writer Writer) {
 	_, _ = fmt.Fprintln(writer, "| Plugin \t | Installed \t| In Current Config \t|")
 	var plugins []*PluginPkg
 
@@ -104,7 +104,7 @@ func writePluginDetails(writer Writer) {
 		plugins = getLocalPlugins()
 	} else if viper.GetBool("all") {
 		plugins = GetPlugins()
-		plugins = appendRemotePlugins(plugins)
+		plugins = appendRemotePlugins(ctx, plugins)
 	} else {
 		plugins = GetPlugins()
 	}
@@ -177,8 +177,8 @@ func GetPlugins() []*PluginPkg {
 // coordinate. This replaced the vetted-list endpoint: it is DISCOVERY, not
 // curation — install-time trust is the §6 signature verification, not presence
 // in this list.
-func fetchInstallablePlugins() ([]*PluginPkg, error) {
-	items, err := oci.NewClient().Browse(context.Background())
+func fetchInstallablePlugins(ctx context.Context) ([]*PluginPkg, error) {
+	items, err := oci.NewClient().Browse(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("browsing grc.store plugins: %w", err)
 	}
@@ -192,8 +192,8 @@ func fetchInstallablePlugins() ([]*PluginPkg, error) {
 }
 
 // appendRemotePlugins appends grc.store-installable plugins not already in the slice.
-func appendRemotePlugins(plugins []*PluginPkg) []*PluginPkg {
-	remote, err := fetchInstallablePlugins()
+func appendRemotePlugins(ctx context.Context, plugins []*PluginPkg) []*PluginPkg {
+	remote, err := fetchInstallablePlugins(ctx)
 	if err != nil {
 		log.Printf("Warning: could not fetch remote plugin list: %v", err)
 		return plugins
