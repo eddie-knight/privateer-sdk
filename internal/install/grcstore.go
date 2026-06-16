@@ -1,8 +1,9 @@
-package command
+package install
 
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -15,12 +16,12 @@ import (
 	"github.com/privateerproj/privateer-sdk/utils"
 )
 
-// installPlugin resolves a plugin DIRECTLY against grc.store (the single source
-// of truth): parse the <ns>/<id>[@<version>] coordinate, confirm it exists via
-// GET /v1/plugins/<ns>/<id>, resolve the version, then pull + verify + install.
-// No legacy plugin-data registry, no GitHub fallback.
-func installPlugin(ctx context.Context, writer Writer, arg string) error {
-	defer func() { _ = writer.Flush() }()
+// FromStore resolves a plugin DIRECTLY against grc.store (the single source of
+// truth): parse the <ns>/<id>[@<version>] coordinate, confirm it exists via GET
+// /v1/plugins/<ns>/<id>, resolve the version, then pull + verify + install. No
+// legacy plugin-data registry, no GitHub fallback. Progress is written to w; the
+// caller owns flushing w.
+func FromStore(ctx context.Context, w io.Writer, arg string) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -32,7 +33,7 @@ func installPlugin(ctx context.Context, writer Writer, arg string) error {
 	ns, id, _ := strings.Cut(coordinate, "/")
 
 	hub := oci.NewClient()
-	_, _ = fmt.Fprintf(writer, "Resolving %s on grc.store (%s)...\n", coordinate, oci.HubURL())
+	_, _ = fmt.Fprintf(w, "Resolving %s on grc.store (%s)...\n", coordinate, oci.HubURL())
 	detail, err := hub.GetPluginDetail(ctx, ns, id)
 	if err != nil {
 		// A not-found is a clear, terminal "no such plugin on grc.store".
@@ -43,7 +44,7 @@ func installPlugin(ctx context.Context, writer Writer, arg string) error {
 		return err
 	}
 
-	return pullVerifyInstall(ctx, writer, hub, detail, release)
+	return pullVerifyInstall(ctx, w, hub, detail, release)
 }
 
 // pullVerifyInstall runs the verified install core: pull the signed index,
@@ -54,7 +55,7 @@ func installPlugin(ctx context.Context, writer Writer, arg string) error {
 // The hub client is passed in (rather than created fresh) so discovery uses
 // the same authenticated client as the plugin-detail lookup above — one
 // client for both hub calls.
-func pullVerifyInstall(ctx context.Context, writer Writer, hub *oci.Client, detail *oci.PluginDetail, release *oci.PluginRelease) error {
+func pullVerifyInstall(ctx context.Context, w io.Writer, hub *oci.Client, detail *oci.PluginDetail, release *oci.PluginRelease) error {
 	coordinate := detail.Coordinate()
 
 	// Resolve the registry host from the configured hub's discovery document
@@ -68,7 +69,7 @@ func pullVerifyInstall(ctx context.Context, writer Writer, hub *oci.Client, deta
 		return fmt.Errorf("resolving registry host: %w", err)
 	}
 
-	_, _ = fmt.Fprintf(writer, "Pulling %s:%s from %s...\n", coordinate, release.Version, host)
+	_, _ = fmt.Fprintf(w, "Pulling %s:%s from %s...\n", coordinate, release.Version, host)
 	fetched, err := oci.PullIndex(ctx, coordinate, release.Version, oci.PullOptions{
 		RegistryHost: host,
 		PlainHTTP:    disco.PlainHTTP(),
@@ -91,7 +92,7 @@ func pullVerifyInstall(ctx context.Context, writer Writer, hub *oci.Client, deta
 		// present but absent from the release list). Signature + TOFU still
 		// apply, but the registry-divergence guard cannot run — say so rather
 		// than letting it silently no-op.
-		_, _ = fmt.Fprintf(writer, "Warning: hub recorded no index digest for %s:%s; skipping registry-divergence cross-check\n", coordinate, release.Version)
+		_, _ = fmt.Fprintf(w, "Warning: hub recorded no index digest for %s:%s; skipping registry-divergence cross-check\n", coordinate, release.Version)
 	}
 
 	// Load the manifest first to read any previously-pinned signer identity
@@ -117,7 +118,7 @@ func pullVerifyInstall(ctx context.Context, writer Writer, hub *oci.Client, deta
 	// accept a new identity.
 	pin, warn := pinnedIdentityFor(m.Find(coordinate), detail.SignerIdentity)
 	if warn != "" {
-		_, _ = fmt.Fprintf(writer, "Warning: %s\n", warn)
+		_, _ = fmt.Fprintf(w, "Warning: %s\n", warn)
 	}
 	policy := verify.IdentityPolicy{PinnedIdentity: pin}
 
@@ -171,7 +172,7 @@ func pullVerifyInstall(ctx context.Context, writer Writer, hub *oci.Client, deta
 		return fmt.Errorf("saving plugin manifest: %w", err)
 	}
 
-	_, _ = fmt.Fprintf(writer, "Successfully installed %s:%s (signed by %s)\n", coordinate, verified.Version, verified.SignerIdentity)
+	_, _ = fmt.Fprintf(w, "Successfully installed %s:%s (signed by %s)\n", coordinate, verified.Version, verified.SignerIdentity)
 	return nil
 }
 

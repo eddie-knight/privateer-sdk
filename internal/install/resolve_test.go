@@ -1,8 +1,9 @@
-package command
+package install
 
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -40,13 +41,13 @@ func mockInstallHub(t *testing.T, found bool, pullHit *bool) *httptest.Server {
 
 // A coordinate the hub doesn't have → a clear "not found", terminal before any
 // registry pull.
-func TestInstallPlugin_NotFound(t *testing.T) {
+func TestFromStore_NotFound(t *testing.T) {
 	pullHit := false
 	hub := mockInstallHub(t, false, &pullHit)
 	defer hub.Close()
 	t.Setenv("PVTR_HUB_URL", hub.URL)
 
-	err := installPlugin(context.Background(), &bufWriter{}, "acme/nonexistent")
+	err := FromStore(context.Background(), io.Discard, "acme/nonexistent")
 	if err == nil {
 		t.Fatal("expected an error for a coordinate not on grc.store")
 	}
@@ -61,13 +62,13 @@ func TestInstallPlugin_NotFound(t *testing.T) {
 // A found coordinate resolves and proceeds to the verified pull core (which then
 // fails at the mock registry — we only assert resolution succeeded and pull was
 // reached, NOT an unverified fallback).
-func TestInstallPlugin_FoundProceedsToPull(t *testing.T) {
+func TestFromStore_FoundProceedsToPull(t *testing.T) {
 	pullHit := false
 	hub := mockInstallHub(t, true, &pullHit)
 	defer hub.Close()
 	t.Setenv("PVTR_HUB_URL", hub.URL)
 
-	err := installPlugin(context.Background(), &bufWriter{}, "acme/hello")
+	err := FromStore(context.Background(), io.Discard, "acme/hello")
 	// It must NOT succeed (no real signed index behind the mock), and must NOT
 	// be the resolution error — it should fail later, at pull/verify.
 	if err == nil {
@@ -83,8 +84,8 @@ func TestInstallPlugin_FoundProceedsToPull(t *testing.T) {
 
 // A bare name (no namespace) is rejected with the coordinate-form guidance —
 // grc.store has no default namespace (the reversed Phase-B default-owner break).
-func TestInstallPlugin_BareNameRejected(t *testing.T) {
-	err := installPlugin(context.Background(), &bufWriter{}, "pvtr-github-repo")
+func TestFromStore_BareNameRejected(t *testing.T) {
+	err := FromStore(context.Background(), io.Discard, "pvtr-github-repo")
 	if err == nil {
 		t.Fatal("expected a bare name to be rejected")
 	}
@@ -94,14 +95,14 @@ func TestInstallPlugin_BareNameRejected(t *testing.T) {
 }
 
 // @version pin resolves the requested version.
-func TestInstallPlugin_VersionPin(t *testing.T) {
+func TestFromStore_VersionPin(t *testing.T) {
 	pullHit := false
 	hub := mockInstallHub(t, true, &pullHit)
 	defer hub.Close()
 	t.Setenv("PVTR_HUB_URL", hub.URL)
 
 	// 0.1.0 exists in the mock's releases; pinning it must resolve and pull.
-	err := installPlugin(context.Background(), &bufWriter{}, "acme/hello@0.1.0")
+	err := FromStore(context.Background(), io.Discard, "acme/hello@0.1.0")
 	if err != nil && strings.Contains(err.Error(), "has no version") {
 		t.Fatalf("pin to an existing version should resolve, got: %v", err)
 	}
@@ -111,7 +112,7 @@ func TestInstallPlugin_VersionPin(t *testing.T) {
 
 	// A non-existent pin must fail at resolution, before pull.
 	pullHit = false
-	err = installPlugin(context.Background(), &bufWriter{}, "acme/hello@9.9.9")
+	err = FromStore(context.Background(), io.Discard, "acme/hello@9.9.9")
 	if err == nil || !strings.Contains(err.Error(), "no version") {
 		t.Errorf("pin to a missing version should fail at resolution, got: %v", err)
 	}
