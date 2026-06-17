@@ -39,6 +39,9 @@ func mergeExitCode(prev, next int) int {
 }
 
 // Run executes all plugins with handling for the command line.
+//
+// Deprecated: use harness.Run instead. This will be removed once the pvtr CLI
+// migrates to the command/harness import path.
 func Run(logger hclog.Logger, getPlugins func() []*PluginPkg) (exitCode int) {
 	logger.Trace(fmt.Sprintf(
 		"Using bin: %s", viper.GetString("binaries-path")))

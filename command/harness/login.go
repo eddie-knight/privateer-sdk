@@ -1,4 +1,4 @@
-package command
+package harness
 
 import (
 	"context"
@@ -9,11 +9,11 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// GetLoginCmd returns `pvtr login` — an interactive OIDC device-grant against
+// loginCmd returns `pvtr login` — an interactive OIDC device-grant against
 // the hub's advertised auth server, storing a token `pvtr publish` reads. The
 // hub + its OIDC coordinates come from discovery (PVTR_HUB_URL), so the user
 // supplies no URLs. CI does not use this — it sets PVTR_TOKEN instead.
-func GetLoginCmd(writerFn func() Writer) *cobra.Command {
+func loginCmd(writerFn func() Writer) *cobra.Command {
 	loginCmd := &cobra.Command{
 		Use:   "login",
 		Short: "Sign in to grc.store (OIDC device grant) for `pvtr publish`.",
@@ -47,9 +47,9 @@ func runLogin(ctx context.Context, writer Writer) error {
 	return nil
 }
 
-// GetLogoutCmd returns `pvtr logout` — forgets the stored credentials for the
+// logoutCmd returns `pvtr logout` — forgets the stored credentials for the
 // hub's issuer.
-func GetLogoutCmd(writerFn func() Writer) *cobra.Command {
+func logoutCmd(writerFn func() Writer) *cobra.Command {
 	return &cobra.Command{
 		Use:   "logout",
 		Short: "Forget stored grc.store credentials.",

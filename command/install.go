@@ -12,6 +12,9 @@ import (
 // initialized lazily (e.g. in a PersistentPreRun hook). The install logic lives
 // in internal/install; this is the CLI seam that owns the writer and dispatches
 // between the grc.store and --local paths.
+//
+// Deprecated: use harness.GetInstallCmd instead. This will be removed once the
+// pvtr CLI migrates to the command/harness import path.
 func GetInstallCmd(writerFn func() Writer) *cobra.Command {
 	var localPath string
 

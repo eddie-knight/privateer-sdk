@@ -1,6 +1,7 @@
 package install
 
 import (
+	"fmt"
 	"testing"
 )
 
@@ -26,16 +27,17 @@ func TestParseCoordinate(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			coord, version, err := parseCoordinate(c.arg)
+			namespace, pluginId, version, err := parseCoordinate(c.arg)
 			if c.wantErr {
 				if err == nil {
-					t.Errorf("expected error for %q, got coord=%q version=%q", c.arg, coord, version)
+					t.Errorf("expected error for %q, got namespace=%q, pluginId=%q version=%q", c.arg, namespace, pluginId, version)
 				}
 				return
 			}
 			if err != nil {
 				t.Fatalf("unexpected error for %q: %v", c.arg, err)
 			}
+			coord := fmt.Sprintf("%s/%s", namespace, pluginId)
 			if coord != c.coord || version != c.version {
 				t.Errorf("parseCoordinate(%q) = (%q, %q), want (%q, %q)", c.arg, coord, version, c.coord, c.version)
 			}
@@ -45,7 +47,7 @@ func TestParseCoordinate(t *testing.T) {
 
 func TestParseCoordinate_BareNameMessageIsActionable(t *testing.T) {
 	// The bare-name error must point the user at the right form.
-	_, _, err := parseCoordinate("pvtr-github-repo")
+	_, _, _, err := parseCoordinate("pvtr-github-repo")
 	if err == nil {
 		t.Fatal("expected error")
 	}

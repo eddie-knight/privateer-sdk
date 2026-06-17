@@ -26,18 +26,17 @@ func FromStore(ctx context.Context, w io.Writer, arg string) error {
 		ctx = context.Background()
 	}
 
-	coordinate, requestedVersion, err := parseCoordinate(arg)
+	namespace, pluginId, requestedVersion, err := parseCoordinate(arg)
 	if err != nil {
 		return err
 	}
-	ns, id, _ := strings.Cut(coordinate, "/")
 
 	hub := oci.NewClient()
-	_, _ = fmt.Fprintf(w, "Resolving %s on grc.store (%s)...\n", coordinate, oci.HubURL())
-	detail, err := hub.GetPluginDetail(ctx, ns, id)
+	_, _ = fmt.Fprintf(w, "Resolving %s/%s on grc.store (%s)...\n", namespace, pluginId, oci.HubURL())
+	detail, err := hub.GetPluginDetail(ctx, namespace, pluginId)
 	if err != nil {
-		// A not-found is a clear, terminal "no such plugin on grc.store".
-		return fmt.Errorf("resolving plugin: %w", err)
+		// This is when we know it is not found on GRC store, or otherwise there was a critical error querying
+		return fmt.Errorf("resolution: %w", err)
 	}
 	release, err := detail.ResolveRelease(requestedVersion)
 	if err != nil {

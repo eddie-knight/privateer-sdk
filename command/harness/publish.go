@@ -1,11 +1,11 @@
-package command
+package harness
 
 import (
 	"github.com/privateerproj/privateer-sdk/internal/publish"
 	"github.com/spf13/cobra"
 )
 
-// GetPublishCmd returns the `pvtr publish` command — the complete one-command
+// publishCmd returns the `pvtr publish` command — the complete one-command
 // producer: assemble a multi-platform OCI index from a GoReleaser dist dir,
 // authenticated-push it to the hub's registry, keyless-sign it against
 // public-good Sigstore and attach the signature as the index's OCI referrer,
@@ -25,7 +25,7 @@ import (
 //
 // The publish logic lives in internal/publish; this is the CLI seam that owns
 // the writer and maps flags to publish.Params.
-func GetPublishCmd(writerFn func() Writer) *cobra.Command {
+func publishCmd(writerFn func() Writer) *cobra.Command {
 	var (
 		distDir  string
 		registry string

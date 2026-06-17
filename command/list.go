@@ -24,6 +24,9 @@ type Writer interface {
 // GetListCmd returns the list command with flags registered.
 // writerFn is called at command execution time, so the writer can be
 // initialized lazily (e.g. in a PersistentPreRun hook).
+//
+// Deprecated: use harness.GetListCmd instead. This will be removed once the
+// pvtr CLI migrates to the command/harness import path.
 func GetListCmd(writerFn func() Writer) *cobra.Command {
 	listCmd := &cobra.Command{
 		Use:   "list",
@@ -46,6 +49,9 @@ func GetListCmd(writerFn func() Writer) *cobra.Command {
 }
 
 // SetListCmdFlags registers the standard list flags on the given command.
+//
+// Deprecated: use harness.SetListCmdFlags instead. This will be removed once the
+// pvtr CLI migrates to the command/harness import path.
 func SetListCmdFlags(cmd *cobra.Command) {
 	cmd.PersistentFlags().BoolP("all", "a", false, "Review the Fleet! List all plugins that have been installed or requested in the current config")
 	_ = viper.BindPFlag("all", cmd.PersistentFlags().Lookup("all"))
