@@ -28,6 +28,14 @@ type EvaluationOrchestrator struct {
 	// evaluated catalog in the publish manifest. Inert at run time; required only
 	// to publish (a plugin runs without it, but cannot be published without it).
 	Publisher string `json:"publisher,omitempty" yaml:"publisher,omitempty"`
+	// License is the plugin's publication license as an SPDX expression
+	// (e.g. "Apache-2.0", or "Apache-2.0 OR MIT"; use a LicenseRef-… token for a
+	// custom license). grc.store requires it on every publication and it is
+	// recorded in the signed plugin config. Like Publisher it is inert at run time
+	// and required only to publish; pvtr validates and canonicalizes it (via
+	// grc-store-protocol/spdx) at publish time, so the plugin only declares the
+	// raw string here.
+	License string `json:"license,omitempty" yaml:"license,omitempty"`
 	// CatalogNamespaces optionally maps a reference-catalog id to the grc.store
 	// namespace that owns it, for plugins that evaluate catalogs published by
 	// someone else (e.g. a community plugin evaluating ossf/osps-baseline).

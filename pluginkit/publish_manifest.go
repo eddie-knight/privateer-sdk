@@ -25,6 +25,11 @@ const PublishManifestCommand = "publish-manifest"
 type PublishManifest struct {
 	// Coordinate is the plugin's grc.store coordinate "<publisher>/<plugin_id>".
 	Coordinate string `json:"coordinate"`
+	// License is the plugin's declared publication license, the raw SPDX
+	// expression from orchestrator.License. It is carried verbatim here; pvtr
+	// validates and canonicalizes it at publish time (grc-store-protocol/spdx is
+	// not imported into the plugin binary).
+	License string `json:"license"`
 	// Evaluates is the control-catalog linkage, deterministically ordered.
 	Evaluates []EvaluatesDeclaration `json:"evaluates"`
 }
@@ -60,6 +65,10 @@ func (v *EvaluationOrchestrator) PublishManifest() (PublishManifest, error) {
 	}
 	if strings.Contains(publisher, "/") || strings.Contains(pluginID, "/") {
 		return PublishManifest{}, fmt.Errorf("Publisher %q and PluginName %q must not contain '/': the coordinate is exactly <publisher>/<plugin_id>", publisher, pluginID)
+	}
+	license := strings.TrimSpace(v.License)
+	if license == "" {
+		return PublishManifest{}, fmt.Errorf("plugin declares no License (grc.store requires one on every publication); set orchestrator.License to an SPDX expression (e.g. \"Apache-2.0\") before it can be published")
 	}
 	if len(v.referenceCatalogs) == 0 {
 		return PublishManifest{}, fmt.Errorf("plugin has no reference catalogs, so it evaluates nothing and cannot be published; load catalogs with AddReferenceCatalogs first")
@@ -121,5 +130,5 @@ func (v *EvaluationOrchestrator) PublishManifest() (PublishManifest, error) {
 	// (and the downstream signed config blob) is byte-deterministic.
 	slices.SortFunc(evals, func(a, b EvaluatesDeclaration) int { return strings.Compare(a.Catalog, b.Catalog) })
 
-	return PublishManifest{Coordinate: publisher + "/" + pluginID, Evaluates: evals}, nil
+	return PublishManifest{Coordinate: publisher + "/" + pluginID, License: license, Evaluates: evals}, nil
 }

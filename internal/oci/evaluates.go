@@ -18,6 +18,12 @@ func ValidateForPublish(p AssembleParams) error {
 	if strings.TrimSpace(p.Version) == "" {
 		return fmt.Errorf("version is required")
 	}
+	// grc.store requires a license on every publication (the hub returns
+	// apierror.LicenseRequired at /sync without one). Presence is mirrored here;
+	// the SPDX-expression format is validated upstream by pvtr publish.
+	if strings.TrimSpace(p.License) == "" {
+		return fmt.Errorf("a license is required: set orchestrator.License to an SPDX expression (e.g. \"Apache-2.0\")")
+	}
 	if len(p.Binaries) == 0 {
 		return fmt.Errorf("no binaries to publish (is the GoReleaser dist empty?)")
 	}

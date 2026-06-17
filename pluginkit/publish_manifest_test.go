@@ -19,6 +19,7 @@ func orchestratorWithCatalog(id, version string, controlIDs ...string) *Evaluati
 	}
 	return &EvaluationOrchestrator{
 		PluginName: "hello",
+		License:    "Apache-2.0",
 		referenceCatalogs: map[string]*gemara.ControlCatalog{
 			id: {
 				Metadata: gemara.Metadata{Id: id, Version: version},
@@ -83,7 +84,7 @@ func TestPublishManifest_FailsClosed(t *testing.T) {
 		}
 	})
 	t.Run("no reference catalogs", func(t *testing.T) {
-		orch := &EvaluationOrchestrator{Publisher: "acme", PluginName: "hello"}
+		orch := &EvaluationOrchestrator{Publisher: "acme", PluginName: "hello", License: "Apache-2.0"}
 		if _, err := orch.PublishManifest(); err == nil || !strings.Contains(err.Error(), "no reference catalogs") {
 			t.Fatalf("expected a no-catalogs error, got %v", err)
 		}
@@ -109,6 +110,15 @@ func TestPublishManifest_FailsClosed(t *testing.T) {
 			t.Fatalf("expected an author.id error (no fabricated namespace), got %v", err)
 		}
 	})
+	t.Run("no license", func(t *testing.T) {
+		orch := orchestratorWithCatalog("c", "1", "R1")
+		orch.Publisher = "acme"
+		setCatalogAuthor(orch, "c", "acme")
+		orch.License = "" // otherwise publishable, but grc.store requires a license
+		if _, err := orch.PublishManifest(); err == nil || !strings.Contains(err.Error(), "License") {
+			t.Fatalf("expected a License error, got %v", err)
+		}
+	})
 }
 
 // orchestratorWithImportingCatalog builds an orchestrator with two reference
@@ -132,6 +142,7 @@ func orchestratorWithImportingCatalog() *EvaluationOrchestrator {
 	return &EvaluationOrchestrator{
 		PluginName: "hello",
 		Publisher:  "acme",
+		License:    "Apache-2.0",
 		referenceCatalogs: map[string]*gemara.ControlCatalog{
 			"primary":  primary,
 			"imported": imported,

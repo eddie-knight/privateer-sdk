@@ -15,6 +15,7 @@ import (
 	"github.com/privateerproj/privateer-sdk/internal/oci"
 	"github.com/privateerproj/privateer-sdk/pluginkit"
 	"github.com/revanite-io/grc-store-protocol/pluginspec"
+	"github.com/revanite-io/grc-store-protocol/spdx"
 )
 
 // Params are the inputs to Publish.
@@ -96,6 +97,7 @@ func Publish(ctx context.Context, w io.Writer, p Params) error {
 		Coordinate: coordinate,
 		Plugin:     coordinate,
 		Version:    version,
+		License:    strings.TrimSpace(manifest.License),
 		Binaries:   bins,
 		Evaluates:  evaluates,
 	}
@@ -112,11 +114,31 @@ func Publish(ctx context.Context, w io.Writer, p Params) error {
 		}
 	}
 
+	// SPDX gate: whenever a license is declared, validate and canonicalize it
+	// BEFORE assembly so the SIGNED config always carries the canonical form, on
+	// every push path (this is grcli's strict check — stricter than the hub, which
+	// is lenient on unknown ids — so a typo'd or unknown id fails locally rather
+	// than being signed and pushed). "Signed ⇒ canonical" is an invariant; the
+	// presence REQUIREMENT, by contrast, is part of the hub contract and is
+	// enforced only on the real publish path below.
+	if assembleParams.License != "" {
+		canonical, err := spdx.Canonicalize(assembleParams.License)
+		if err != nil {
+			return fmt.Errorf("plugin license %q is not a valid SPDX expression (set orchestrator.License): %w", assembleParams.License, err)
+		}
+		assembleParams.License = canonical
+	}
+
 	// 4. PREFLIGHT: validate the hub's required fields BEFORE any push/sign, so a
 	//    malformed index never lands (and orphans signed bytes) in the registry.
 	//    --registry is the anonymous smoke path and is exempt (it never syncs, so
-	//    the hub contract doesn't apply — it's for testing assembly/push only).
+	//    the hub contract — including the license REQUIREMENT — doesn't apply; it's
+	//    for testing assembly/push only).
 	if p.Registry == "" {
+		// The empty case gets a clearer message than the SPDX parser would give.
+		if assembleParams.License == "" {
+			return fmt.Errorf("the plugin declared no license — set orchestrator.License to an SPDX expression (e.g. \"Apache-2.0\")")
+		}
 		if err := oci.ValidateForPublish(assembleParams); err != nil {
 			return fmt.Errorf("plugin is not publishable: %w", err)
 		}

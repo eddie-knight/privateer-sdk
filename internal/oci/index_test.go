@@ -26,6 +26,7 @@ func baseParams(bins []PlatformBinary) AssembleParams {
 		Coordinate: "ossf/pvtr-github-repo-scanner",
 		Plugin:     "ossf/pvtr-github-repo-scanner",
 		Version:    "1.4.0",
+		License:    "Apache-2.0",
 		Binaries:   bins,
 		Evaluates: []pluginspec.Evaluate{
 			{Catalog: "ossf/osps.baseline", CatalogVersion: "2025.02", RequirementIDs: []string{"OSPS-AC-01"}},
@@ -126,6 +127,9 @@ func TestAssembleIndex_ConfigBlobContent(t *testing.T) {
 	}
 	if cfg.Version != "1.4.0" {
 		t.Errorf("version = %q", cfg.Version)
+	}
+	if cfg.License != "Apache-2.0" {
+		t.Errorf("license = %q (must be written into the signed config blob)", cfg.License)
 	}
 	if cfg.Entrypoint != "github-repo" {
 		t.Errorf("entrypoint = %q (must be the go-plugin name, not the repo)", cfg.Entrypoint)

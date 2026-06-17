@@ -19,6 +19,7 @@ func TestPluginConfigWireFormat(t *testing.T) {
 	cfg := pluginspec.Config{
 		Plugin:     "sandbox/sandbox-plugin",
 		Version:    "0.26.1-rc",
+		License:    "Apache-2.0",
 		Platform:   pluginspec.Platform{OS: "linux", Arch: "amd64"},
 		Entrypoint: "github-repo",
 		Protocol:   defaultProtocol,
@@ -30,7 +31,7 @@ func TestPluginConfigWireFormat(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	const want = `{"plugin":"sandbox/sandbox-plugin","version":"0.26.1-rc","platform":{"os":"linux","arch":"amd64"},"entrypoint":"github-repo","protocol":"netrpc","evaluates":[{"catalog":"openssf/osps-baseline","catalog_version":"2025.10","requirement_ids":["OSPS-AC-01","OSPS-AC-02"]}]}`
+	const want = `{"plugin":"sandbox/sandbox-plugin","version":"0.26.1-rc","license":"Apache-2.0","platform":{"os":"linux","arch":"amd64"},"entrypoint":"github-repo","protocol":"netrpc","evaluates":[{"catalog":"openssf/osps-baseline","catalog_version":"2025.10","requirement_ids":["OSPS-AC-01","OSPS-AC-02"]}]}`
 	if string(got) != want {
 		t.Fatalf("config-blob wire format drift:\n got  %s\n want %s", got, want)
 	}
@@ -60,7 +61,7 @@ func TestPluginConfigWireFormat_EmptyEvaluatesShape(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	const wantNil = `{"plugin":"ns/p","version":"1.0.0","platform":{"os":"linux","arch":"amd64"},"entrypoint":"p","protocol":"netrpc","evaluates":null}`
+	const wantNil = `{"plugin":"ns/p","version":"1.0.0","license":"","platform":{"os":"linux","arch":"amd64"},"entrypoint":"p","protocol":"netrpc","evaluates":null}`
 	if string(gotNil) != wantNil {
 		t.Errorf("nil Evaluates shape drift:\n got  %s\n want %s", gotNil, wantNil)
 	}
@@ -69,7 +70,7 @@ func TestPluginConfigWireFormat_EmptyEvaluatesShape(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	const wantEmpty = `{"plugin":"ns/p","version":"1.0.0","platform":{"os":"linux","arch":"amd64"},"entrypoint":"p","protocol":"netrpc","evaluates":[]}`
+	const wantEmpty = `{"plugin":"ns/p","version":"1.0.0","license":"","platform":{"os":"linux","arch":"amd64"},"entrypoint":"p","protocol":"netrpc","evaluates":[]}`
 	if string(gotEmpty) != wantEmpty {
 		t.Errorf("empty Evaluates shape drift:\n got  %s\n want %s", gotEmpty, wantEmpty)
 	}

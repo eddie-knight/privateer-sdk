@@ -89,6 +89,10 @@ type AssembleParams struct {
 	// Version is the release version (tag without leading v is fine; recorded
 	// verbatim in the config blobs).
 	Version string
+	// License is the publication license as a (canonical) SPDX expression,
+	// written into every config blob. grc.store requires it; the caller
+	// (pvtr publish) validates and canonicalizes it before assembly.
+	License string
 	// Binaries are the resolved per-platform binaries (darwin universal already
 	// re-expanded by LoadGoReleaserBuild).
 	Binaries []PlatformBinary
@@ -144,6 +148,7 @@ func AssembleIndex(p AssembleParams) (*AssembledIndex, error) {
 		cfg := pluginspec.Config{
 			Plugin:     p.Plugin,
 			Version:    p.Version,
+			License:    p.License,
 			Platform:   pluginspec.Platform{OS: b.OS, Arch: b.Arch},
 			Entrypoint: b.Entrypoint,
 			Protocol:   defaultProtocol,

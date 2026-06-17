@@ -31,6 +31,7 @@ func stubManifest(m pluginkit.PublishManifest) func(context.Context, []oci.Platf
 func acmeHelloManifest() pluginkit.PublishManifest {
 	return pluginkit.PublishManifest{
 		Coordinate: "acme/hello",
+		License:    "Apache-2.0",
 		Evaluates: []pluginkit.EvaluatesDeclaration{{
 			Catalog:        "acme/example",
 			CatalogVersion: "2026.01",
@@ -73,13 +74,92 @@ func TestPublish_MissingEvaluatesFailsBeforePush(t *testing.T) {
 	// (network) error; asserting the evaluates message proves we failed first.
 	err := Publish(context.Background(), io.Discard, Params{
 		DistDir:         writeMinimalDist(t),
-		resolveManifest: stubManifest(pluginkit.PublishManifest{Coordinate: "acme/hello"}),
+		resolveManifest: stubManifest(pluginkit.PublishManifest{Coordinate: "acme/hello", License: "Apache-2.0"}),
 	})
 	if err == nil {
 		t.Fatal("expected preflight to reject a manifest with no evaluates")
 	}
 	if !strings.Contains(err.Error(), "evaluates") {
 		t.Errorf("error should name evaluates, got %v", err)
+	}
+}
+
+func TestPublish_NoLicenseFailsBeforePush(t *testing.T) {
+	// A manifest with a coordinate + evaluates but no license must fail at
+	// preflight — before discovery/push — naming the license. No PVTR_HUB_URL is
+	// set, so reaching discovery would be a different (network) error.
+	m := acmeHelloManifest()
+	m.License = ""
+	err := Publish(context.Background(), io.Discard, Params{
+		DistDir:         writeMinimalDist(t),
+		resolveManifest: stubManifest(m),
+	})
+	if err == nil {
+		t.Fatal("expected preflight to reject a manifest with no license")
+	}
+	if !strings.Contains(err.Error(), "license") {
+		t.Errorf("error should name the missing license, got %v", err)
+	}
+}
+
+func TestPublish_InvalidLicenseFailsBeforePush(t *testing.T) {
+	// A well-formed-but-unknown SPDX id must fail the strict grcli gate before any
+	// push, rather than being signed and pushed for the hub to reject.
+	m := acmeHelloManifest()
+	m.License = "Definitely-Not-A-License-9000"
+	err := Publish(context.Background(), io.Discard, Params{
+		DistDir:         writeMinimalDist(t),
+		resolveManifest: stubManifest(m),
+	})
+	if err == nil {
+		t.Fatal("expected preflight to reject an invalid SPDX license")
+	}
+	if !strings.Contains(err.Error(), "SPDX") {
+		t.Errorf("error should name the SPDX validation failure, got %v", err)
+	}
+}
+
+func TestPublish_RegistryPathRejectsInvalidLicense(t *testing.T) {
+	// The --registry smoke path is exempt from the hub contract, but
+	// canonicalization still applies (signed ⇒ canonical), so an invalid SPDX id
+	// fails before any push — the registry host below is never reached.
+	m := acmeHelloManifest()
+	m.License = "Definitely-Not-A-License-9000"
+	err := Publish(context.Background(), io.Discard, Params{
+		DistDir:         writeMinimalDist(t),
+		Registry:        "http://127.0.0.1:1",
+		resolveManifest: stubManifest(m),
+	})
+	if err == nil {
+		t.Fatal("expected the --registry path to reject an invalid SPDX license")
+	}
+	if !strings.Contains(err.Error(), "SPDX") {
+		t.Errorf("error should be the SPDX failure (not a network error), got %v", err)
+	}
+}
+
+func TestPublish_RegistryPathAllowsEmptyLicense(t *testing.T) {
+	// --registry is exempt from the license REQUIREMENT (it never /syncs). An empty
+	// license must get PAST the gate and fail later at the push, NOT at the license.
+	// 400 (not 5xx) so oras fails fast without retry backoff — the push just needs
+	// to fail for a reason that is NOT the license.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+	}))
+	defer srv.Close()
+
+	m := acmeHelloManifest()
+	m.License = ""
+	err := Publish(context.Background(), io.Discard, Params{
+		DistDir:         writeMinimalDist(t),
+		Registry:        srv.URL,
+		resolveManifest: stubManifest(m),
+	})
+	if err == nil {
+		t.Fatal("expected a push failure against the stub registry")
+	}
+	if strings.Contains(err.Error(), "license") || strings.Contains(err.Error(), "SPDX") {
+		t.Errorf("empty license must be allowed on the --registry path; the failure should be the push, got %v", err)
 	}
 }
 

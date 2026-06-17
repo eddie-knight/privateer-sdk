@@ -12,6 +12,7 @@ func TestValidateForPublish_RejectsEmptyEvaluates(t *testing.T) {
 	p := AssembleParams{
 		Coordinate: "sandbox/hello",
 		Version:    "0.1.0",
+		License:    "Apache-2.0",
 		Binaries:   []PlatformBinary{{OS: "linux", Arch: "amd64", Path: "/x", Entrypoint: "hello"}},
 	}
 	err := ValidateForPublish(p)
@@ -27,6 +28,7 @@ func TestValidateForPublish_AcceptsWellFormed(t *testing.T) {
 	p := AssembleParams{
 		Coordinate: "sandbox/hello",
 		Version:    "0.1.0",
+		License:    "Apache-2.0",
 		Binaries:   []PlatformBinary{{OS: "linux", Arch: "amd64", Path: "/x", Entrypoint: "hello"}},
 		Evaluates:  []pluginspec.Evaluate{{Catalog: "sandbox/example", CatalogVersion: "2026.01", RequirementIDs: []string{"SBX.1"}}},
 	}
@@ -35,11 +37,30 @@ func TestValidateForPublish_AcceptsWellFormed(t *testing.T) {
 	}
 }
 
+func TestValidateForPublish_RejectsMissingLicense(t *testing.T) {
+	// grc.store requires a license; an otherwise well-formed plugin without one
+	// must be rejected at preflight.
+	p := AssembleParams{
+		Coordinate: "sandbox/hello",
+		Version:    "0.1.0",
+		Binaries:   []PlatformBinary{{OS: "linux", Arch: "amd64", Path: "/x", Entrypoint: "hello"}},
+		Evaluates:  []pluginspec.Evaluate{{Catalog: "sandbox/example", CatalogVersion: "2026.01", RequirementIDs: []string{"SBX.1"}}},
+	}
+	err := ValidateForPublish(p)
+	if err == nil {
+		t.Fatal("expected preflight to reject a plugin with no license")
+	}
+	if !strings.Contains(err.Error(), "license") {
+		t.Errorf("error should name the license: %v", err)
+	}
+}
+
 func TestValidateForPublish_RejectsBadFields(t *testing.T) {
 	base := func() AssembleParams {
 		return AssembleParams{
 			Coordinate: "sandbox/hello",
 			Version:    "0.1.0",
+			License:    "Apache-2.0",
 			Binaries:   []PlatformBinary{{OS: "linux", Arch: "amd64", Path: "/x", Entrypoint: "hello"}},
 			Evaluates:  []pluginspec.Evaluate{{Catalog: "sandbox/example", CatalogVersion: "2026.01", RequirementIDs: []string{"SBX.1"}}},
 		}
