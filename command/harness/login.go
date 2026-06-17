@@ -11,15 +11,16 @@ import (
 
 // loginCmd returns `pvtr login` — an interactive OIDC device-grant against
 // the hub's advertised auth server, storing a token `pvtr publish` reads. The
-// hub + its OIDC coordinates come from discovery (PVTR_HUB_URL), so the user
-// supplies no URLs. CI does not use this — it sets PVTR_TOKEN instead.
+// hub + its OIDC coordinates come from discovery against the configured hub
+// (the hub-url config key / PVTR_HUB_URL), so the user supplies no URLs. CI does
+// not use this — it sets PVTR_TOKEN instead.
 func loginCmd(writerFn func() Writer) *cobra.Command {
 	loginCmd := &cobra.Command{
 		Use:   "login",
 		Short: "Sign in to grc.store (OIDC device grant) for `pvtr publish`.",
 		Long: "Run an OAuth 2.0 device-authorization flow against the auth server the hub " +
-			"advertises (PVTR_HUB_URL → discovery → oidc_issuer / oidc_cli_client_id) and store " +
-			"the token so `pvtr publish` can authenticate. In CI, set PVTR_TOKEN instead of logging in.",
+			"advertises (hub-url config / PVTR_HUB_URL → discovery → oidc_issuer / oidc_cli_client_id) " +
+			"and store the token so `pvtr publish` can authenticate. In CI, set PVTR_TOKEN instead of logging in.",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return runLogin(cmd.Context(), writerFn())
 		},
@@ -34,7 +35,7 @@ func runLogin(ctx context.Context, writer Writer) error {
 	}
 	disco, err := oci.NewClient().Discover(ctx)
 	if err != nil {
-		return fmt.Errorf("hub discovery (PVTR_HUB_URL=%s): %w", oci.HubURL(), err)
+		return fmt.Errorf("hub discovery (hub %s): %w", oci.HubURL(), err)
 	}
 	if disco.OIDCIssuer == "" {
 		return fmt.Errorf("the hub at %s does not advertise an OIDC issuer; `pvtr login` is not supported there", oci.HubURL())

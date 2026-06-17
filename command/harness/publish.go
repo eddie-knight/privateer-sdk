@@ -36,7 +36,7 @@ func publishCmd(writerFn func() Writer) *cobra.Command {
 		Use:   "publish",
 		Short: "Assemble, push, and sync a plugin's OCI index to grc.store.",
 		Long: "Assemble a multi-platform OCI plugin index from a GoReleaser dist directory, " +
-			"push it to the grc.store registry (discovered from PVTR_HUB_URL, default " +
+			"push it to the grc.store registry (discovered from the hub-url config / PVTR_HUB_URL, default " +
 			"https://hub.grc.store), and POST /sync so the hub ingests and verifies it.\n\n" +
 			"The plugin's coordinate and evaluated catalogs are read from the built binary " +
 			"itself (its publish-manifest), not from flags — set orchestrator.Publisher in the " +

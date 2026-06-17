@@ -19,14 +19,26 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/spf13/viper"
 )
 
-// DefaultHubURL is the production grc.store hub base. Overridden with the
-// PVTR_HUB_URL environment variable (e.g. http://localhost:8088 against the
-// local dev stack, or https://hub.preview.grc.store against preview).
+// DefaultHubURL is the production grc.store hub base, used when no hub URL is
+// configured. Override it with the "hub-url" config key — set in config.yml, or
+// via the PVTR_HUB_URL environment variable (e.g. http://localhost:8088 against
+// the local dev stack, or https://hub.preview.grc.store against preview).
 const DefaultHubURL = "https://hub.grc.store"
 
-// hubURLEnv is the environment variable that overrides the hub base URL.
+// hubURLKey is the viper/config.yml key for the hub base URL. It is a first-class
+// config option like binaries-path: settable in config.yml and overridable by the
+// PVTR_HUB_URL environment variable (viper's PVTR_ prefix + "-"→"_" replacer maps
+// the hub-url key onto PVTR_HUB_URL).
+const hubURLKey = "hub-url"
+
+// hubURLEnv is the explicit environment variable name. HubURL reads it directly
+// as a fallback for callers that resolve the hub URL before viper config has been
+// initialized (e.g. unit tests); in a normal CLI run viper.GetString(hubURLKey)
+// already honors it via AutomaticEnv.
 const hubURLEnv = "PVTR_HUB_URL"
 
 // wellKnownPath is the discovery document path served by the hub (ADR-0026).
@@ -46,10 +58,15 @@ type Discovery struct {
 	OIDCClientID string `json:"oidc_cli_client_id,omitempty"`
 }
 
-// HubURL returns the configured hub base URL: PVTR_HUB_URL if set, else the
-// production default. The returned value has no trailing slash.
+// HubURL returns the configured hub base URL with no trailing slash. Resolution
+// precedence: the "hub-url" config key (config.yml or PVTR_HUB_URL env, via
+// viper) first, then the PVTR_HUB_URL environment variable read directly (a
+// fallback for pre-viper-init callers such as unit tests), then DefaultHubURL.
 func HubURL() string {
-	base := os.Getenv(hubURLEnv)
+	base := viper.GetString(hubURLKey)
+	if base == "" {
+		base = os.Getenv(hubURLEnv)
+	}
 	if base == "" {
 		base = DefaultHubURL
 	}

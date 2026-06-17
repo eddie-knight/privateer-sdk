@@ -27,6 +27,9 @@
 package harness
 
 import (
+	"context"
+	"fmt"
+
 	hclog "github.com/hashicorp/go-hclog"
 	"github.com/spf13/cobra"
 
@@ -98,8 +101,23 @@ func GeneratePlugin(logger hclog.Logger) (exitCode int) {
 
 // --- plugin execution -------------------------------------------------------
 
-// Run forwards to command.Run.
-func Run(logger hclog.Logger, getPlugins func() []*PluginPkg) (exitCode int) {
+// Run executes the plugins selected by getPlugins, first running the autoinstall
+// preflight: when the config sets `autoinstall: true`, any requested-but-missing
+// plugins are installed from grc.store before the run, so a single `pvtr run`
+// works without a separate `pvtr install` step. Folding the preflight in here
+// makes "a run installs what it needs" a guarantee of the run entry point rather
+// than a convention each caller must remember; it is a no-op when autoinstall is
+// disabled, leaving the usual "not installed" failure.
+//
+// ctx bounds the preflight's hub/registry calls. w receives install progress and
+// is flushed before plugins start. logger and getPlugins drive the run loop.
+func Run(ctx context.Context, w Writer, logger hclog.Logger, getPlugins func() []*PluginPkg) (exitCode int) {
+	if err := ensureRequestedInstalled(ctx, w); err != nil {
+		logger.Error(fmt.Sprintf("autoinstall preflight failed: %s", err))
+		_ = w.Flush()
+		return command.BadUsage
+	}
+	_ = w.Flush()
 	return command.Run(logger, getPlugins)
 }
 
