@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"sync"
 	"testing"
+	"time"
 )
 
 func TestAPICallCounter_NilReportsZero(t *testing.T) {
@@ -18,6 +19,77 @@ func TestAPICallCounter_ZeroValueIsUsable(t *testing.T) {
 	counter := &APICallCounter{}
 	if got := counter.APICallCount(); got != 0 {
 		t.Errorf("expected a fresh counter to report 0, got %d", got)
+	}
+}
+
+func TestNewBenchmarkClient_CountsAndLeavesBaseAlone(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	baseTransport := http.DefaultTransport
+	base := &http.Client{Transport: baseTransport, Timeout: 7 * time.Second}
+
+	client, counter := NewBenchmarkClient(base)
+
+	if client == base {
+		t.Error("expected a copy, got the same client back")
+	}
+	if base.Transport != baseTransport {
+		t.Error("expected base's transport to be untouched")
+	}
+	if client.Timeout != 7*time.Second {
+		t.Errorf("expected the copy to carry base's settings, got timeout %v", client.Timeout)
+	}
+
+	resp, err := client.Get(server.URL)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	_ = resp.Body.Close()
+
+	if got := counter.APICallCount(); got != 1 {
+		t.Errorf("expected 1 counted round trip, got %d", got)
+	}
+
+	// Requests through base must not reach the counter.
+	resp, err = base.Get(server.URL)
+	if err != nil {
+		t.Fatalf("request through base failed: %v", err)
+	}
+	_ = resp.Body.Close()
+
+	if got := counter.APICallCount(); got != 1 {
+		t.Errorf("expected base's request to go uncounted, got %d", got)
+	}
+}
+
+func TestNewBenchmarkClient_NilBase(t *testing.T) {
+	client, counter := NewBenchmarkClient(nil)
+	if client == nil || client.Transport == nil {
+		t.Fatal("expected NewBenchmarkClient(nil) to yield a usable client")
+	}
+	if counter == nil {
+		t.Fatal("expected a non-nil counter")
+	}
+	if got := counter.APICallCount(); got != 0 {
+		t.Errorf("expected a fresh counter to report 0, got %d", got)
+	}
+}
+
+// The returned counter satisfies APICallReporter when embedded in a payload,
+// which is how benchmark reporting picks it up.
+func TestNewBenchmarkClient_CounterSatisfiesReporter(t *testing.T) {
+	type payload struct {
+		*APICallCounter
+	}
+
+	_, counter := NewBenchmarkClient(nil)
+	var reporter APICallReporter = payload{APICallCounter: counter}
+
+	if got := reporter.APICallCount(); got != 0 {
+		t.Errorf("expected 0, got %d", got)
 	}
 }
 

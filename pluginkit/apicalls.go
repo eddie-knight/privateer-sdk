@@ -14,9 +14,13 @@ import (
 //	    *pluginkit.APICallCounter
 //	}
 //
-//	counter := &pluginkit.APICallCounter{}
-//	httpClient := counter.WrapClient(oauth2.NewClient(ctx, src))
-//	return Payload{APICallCounter: counter /* ... */}
+//	httpClient, apiCalls := pluginkit.NewBenchmarkClient(
+//	    oauth2.NewClient(ctx, src),
+//	)
+//	return Payload{APICallCounter: apiCalls /* ... */}
+//
+// NewBenchmarkClient is the usual entry point. Wrap and WrapClient are the
+// lower-level forms, for decorating a transport directly or a client in place.
 //
 // Embed the pointer, not the value: payloads are commonly used by value, and a
 // value-embedded counter would be copied so the tallies diverge. Copying is a
@@ -65,6 +69,36 @@ func (c *APICallCounter) WrapClient(client *http.Client) *http.Client {
 	}
 	client.Transport = c.Wrap(client.Transport)
 	return client
+}
+
+// NewBenchmarkClient returns a copy of base whose transport counts every round
+// trip, together with the counter tallying them. It is the one-step form of
+// pairing a counter with a client, for the common case where a plugin builds
+// its authenticated client and wants `pvtr benchmark` to report its API calls:
+//
+//	httpClient, apiCalls := pluginkit.NewBenchmarkClient(
+//	    oauth2.NewClient(ctx, src),
+//	)
+//	// ...
+//	return Payload{APICallCounter: apiCalls /* ... */}
+//
+// Store the returned counter on the payload — embedding *APICallCounter
+// promotes APICallCount onto it, satisfying APICallReporter. A payload that
+// omits it reports no API calls rather than failing, so a dropped counter is
+// silent.
+//
+// base is not modified: its transport is read, and the decorated transport is
+// set on the returned copy. A nil base yields a new client. Callers holding an
+// auth library's client can keep using it uncounted. Use WrapClient instead to
+// decorate a client in place.
+func NewBenchmarkClient(base *http.Client) (*http.Client, *APICallCounter) {
+	counter := &APICallCounter{}
+	client := &http.Client{}
+	if base != nil {
+		*client = *base
+	}
+	client.Transport = counter.Wrap(client.Transport)
+	return client, counter
 }
 
 // countingTransport increments its counter once per round trip.
