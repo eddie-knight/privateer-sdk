@@ -1,6 +1,6 @@
 header:
   schema-version: 2.2.0
-  last-updated: "2026-02-21"
+  last-updated: "2026-08-19"
   last-reviewed: "2026-02-21"
   url: https://github.com/privateerproj/privateer-sdk/blob/main/.github/security-insights.yml
   project-si-source: https://raw.githubusercontent.com/privateerproj/.github/refs/heads/main/.github/security-insights.yml
@@ -59,4 +59,38 @@ repository:
         integration:
           adhoc: true
           ci: false
+          release: false
+      - name: govulncheck
+        type: SCA
+        version: "1"
+        rulesets:
+          - default
+        results:
+          ci:
+            name: govulncheck Scan Results
+            predicate-uri: https://go.dev/security/vuln
+            location: https://github.com/privateerproj/privateer-sdk/actions/workflows/security-scan.yml
+            comment: |
+              Call-graph-aware Go vulnerability scanning runs on every pull request
+              and on a weekly schedule via the Security Scan workflow.
+        integration:
+          adhoc: false
+          ci: true
+          release: false
+      - name: Dependency Review
+        type: SCA
+        version: "5"
+        rulesets:
+          - default
+        results:
+          ci:
+            name: Dependency Review Results
+            predicate-uri: https://docs.github.com/en/code-security/supply-chain-security/understanding-your-software-supply-chain/about-dependency-review
+            location: https://github.com/privateerproj/privateer-sdk/actions/workflows/security-scan.yml
+            comment: |
+              Blocks pull requests that introduce dependencies with known
+              vulnerabilities (high or above) or disallowed licenses.
+        integration:
+          adhoc: false
+          ci: true
           release: false
