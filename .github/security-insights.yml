@@ -1,7 +1,7 @@
 header:
   schema-version: 2.2.0
   last-updated: "2026-08-19"
-  last-reviewed: "2026-02-21"
+  last-reviewed: "2026-08-19"
   url: https://github.com/privateerproj/privateer-sdk/blob/main/.github/security-insights.yml
   project-si-source: https://raw.githubusercontent.com/privateerproj/.github/refs/heads/main/.github/security-insights.yml
   comment: |
@@ -16,8 +16,8 @@ repository:
   no-third-party-packages: false
   core-team:
     - name: Eddie Knight
-      affiliation: Sonatype
-      social: https://bsky.app/profile/eddieknight.dev
+      affiliation: Revanite
+      social: https://linkedin.com/in/knight1776
       primary: true
     - name: Jason Meridth
       affiliation: Chainguard
@@ -89,7 +89,7 @@ repository:
             location: https://github.com/privateerproj/privateer-sdk/actions/workflows/security-scan.yml
             comment: |
               Blocks pull requests that introduce dependencies with known
-              vulnerabilities (high or above) or disallowed licenses.
+              vulnerabilities (high or above).
         integration:
           adhoc: false
           ci: true
