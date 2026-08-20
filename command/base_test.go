@@ -4,10 +4,13 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
+
+	"github.com/privateerproj/privateer-sdk/config"
 )
 
 func resetViper() {
@@ -36,6 +39,63 @@ func TestSetBase_ConfigFlagDefaultIsEmpty(t *testing.T) {
 		t.Fatal("expected config flag to be registered")
 	} else if flag.DefValue != "" {
 		t.Errorf("expected config flag default to be empty, got %q", flag.DefValue)
+	}
+}
+
+func TestSetRunFlags_TargetAliasForService(t *testing.T) {
+	resetViper()
+	t.Cleanup(func() {
+		viper.Reset()
+		config.BindTargetFlags(nil)
+	})
+	cmd := &cobra.Command{Use: "test"}
+	SetRunFlags(cmd)
+
+	target := cmd.PersistentFlags().Lookup("target")
+	if target == nil {
+		t.Fatal("expected target flag to be registered")
+	}
+	if target.Shorthand != "" {
+		t.Errorf("target flag shorthand: got = %q, want none (-t belongs to --test-suites)", target.Shorthand)
+	}
+
+	service := cmd.PersistentFlags().Lookup("service")
+	if service == nil {
+		t.Fatal("expected service flag to remain registered")
+	} else if service.Shorthand != "s" {
+		t.Errorf("service flag shorthand: got = %q, want = %q", service.Shorthand, "s")
+	}
+
+	if err := cmd.PersistentFlags().Set("target", "my-target"); err != nil {
+		t.Fatalf("failed to set target flag: %v", err)
+	}
+	if got := viper.GetString("target"); got != "my-target" {
+		t.Errorf("viper target binding: got = %q, want = %q", got, "my-target")
+	}
+}
+
+// The harness launches each plugin subprocess with --service=<name> while the
+// child inherits the parent's environment. An inherited PVTR_TARGET must not
+// beat the explicitly passed flag, or every plugin in a multi-target run would
+// resolve the same target and overwrite its results.
+func TestSetRunFlags_ServiceFlagBeatsInheritedEnvTarget(t *testing.T) {
+	resetViper()
+	t.Cleanup(func() {
+		viper.Reset()
+		config.BindTargetFlags(nil)
+	})
+	viper.SetEnvPrefix("PVTR")
+	viper.SetEnvKeyReplacer(strings.NewReplacer("-", "_"))
+	viper.AutomaticEnv()
+
+	cmd := &cobra.Command{Use: "test"}
+	SetRunFlags(cmd)
+	t.Setenv("PVTR_TARGET", "env-target")
+	if err := cmd.PersistentFlags().Set("service", "flag-service"); err != nil {
+		t.Fatal(err)
+	}
+	if got := config.TargetName(); got != "flag-service" {
+		t.Errorf("config.TargetName() = %q, want = %q", got, "flag-service")
 	}
 }
 

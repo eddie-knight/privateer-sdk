@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
 )
 
@@ -23,16 +24,75 @@ func AutoInstall() bool {
 	return viper.GetBool("autoinstall")
 }
 
-// GetServices returns the services map from config (service name -> service config).
+// targetFlags holds the flag set registered by command.SetRunFlags so
+// TargetName can rank an explicitly passed --target/--service above env and
+// config values. Viper cannot arbitrate that itself: "target" and "service"
+// are distinct keys, so its per-key flag-over-env precedence never compares
+// one key's flag against the other key's env var.
+var targetFlags *pflag.FlagSet
+
+// BindTargetFlags registers the flag set containing the "target" and "service"
+// flags so TargetName can give explicitly passed flags top precedence.
+func BindTargetFlags(fs *pflag.FlagSet) {
+	targetFlags = fs
+}
+
+// changedFlagValue returns the named flag's value only when the flag was
+// explicitly set on the command line.
+func changedFlagValue(name string) (string, bool) {
+	if targetFlags == nil {
+		return "", false
+	}
+	f := targetFlags.Lookup(name)
+	if f == nil || !f.Changed {
+		return "", false
+	}
+	return f.Value.String(), true
+}
+
+// TargetName returns the name of the target being executed, resolved from the
+// "target" key with fallback to the legacy "service" alias. Explicitly passed
+// flags outrank env and config values regardless of which alias they use, so a
+// plugin subprocess launched with --service is immune to an inherited
+// PVTR_TARGET and an operator's -s overrides a config-file target. Within the
+// same tier, "target" wins over "service".
+func TargetName() string {
+	if name, ok := changedFlagValue("target"); ok && name != "" {
+		return name
+	}
+	if name, ok := changedFlagValue("service"); ok && name != "" {
+		return name
+	}
+	if name := viper.GetString("target"); name != "" {
+		return name
+	}
+	return viper.GetString("service")
+}
+
+// targetsKey returns the config key holding the target definitions: "targets"
+// when it holds a non-empty map, otherwise the legacy "services" alias. When
+// both maps are populated, "targets" wins outright; the two maps are never
+// merged. Gating on a non-empty map rather than key presence keeps a stray
+// PVTR_TARGETS env var, an emptied-out `targets:` block, or a mistyped scalar
+// from silently masking a populated `services:` map.
+func targetsKey() string {
+	if len(viper.GetStringMap("targets")) > 0 {
+		return "targets"
+	}
+	return "services"
+}
+
+// GetServices returns the targets map from config (target name -> target config),
+// read from the "targets" key or its legacy "services" alias.
 // It reads from the same viper state as NewConfig (e.g. after command.ReadConfig()).
 func GetServices() map[string]interface{} {
-	return viper.GetStringMap("services")
+	return viper.GetStringMap(targetsKey())
 }
 
 // GetServicePlugin returns the plugin name for the given service.
 // It reads from the same viper state as NewConfig (e.g. after command.ReadConfig()).
 func GetServicePlugin(serviceName string) string {
-	return viper.GetString("services." + serviceName + ".plugin")
+	return viper.GetString(targetsKey() + "." + serviceName + ".plugin")
 }
 
 // GetServiceVersion returns the optional pinned plugin version for the given
@@ -46,7 +106,7 @@ func GetServicePlugin(serviceName string) string {
 // the "v"-prefixed string — surfacing a confusing "no version" error for what is
 // just a formatting difference.
 func GetServiceVersion(serviceName string) string {
-	return normalizeVersion(viper.GetString("services." + serviceName + ".version"))
+	return normalizeVersion(viper.GetString(targetsKey() + "." + serviceName + ".version"))
 }
 
 // normalizeVersion strips a single leading "v" when it precedes a digit (the

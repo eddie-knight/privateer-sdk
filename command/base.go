@@ -11,6 +11,8 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
+
+	"github.com/privateerproj/privateer-sdk/config"
 )
 
 // SetBase sets the flags that are universal to every command. These are safe to
@@ -34,8 +36,16 @@ func SetRunFlags(cmd *cobra.Command) {
 	cmd.PersistentFlags().StringP("write-directory", "w", "evaluation_results", "Directory to write evaluation results to")
 	_ = viper.BindPFlag("write-directory", cmd.PersistentFlags().Lookup("write-directory"))
 
-	cmd.PersistentFlags().StringP("service", "s", "", "Named service to execute from the config")
+	cmd.PersistentFlags().StringP("service", "s", "", "Named service to execute from the config (alias for --target)")
 	_ = viper.BindPFlag("service", cmd.PersistentFlags().Lookup("service"))
+
+	// No shorthand: -t belongs to --test-suites.
+	cmd.PersistentFlags().String("target", "", "Named target to execute from the config")
+	_ = viper.BindPFlag("target", cmd.PersistentFlags().Lookup("target"))
+
+	// Let config.TargetName rank explicitly passed --target/--service flags
+	// above env and config values; viper can't compare across the two keys.
+	config.BindTargetFlags(cmd.PersistentFlags())
 
 	cmd.PersistentFlags().StringP("test-suites", "t", "default", "Named set of test sets to execute from the plugin")
 	_ = viper.BindPFlag("test-suites", cmd.PersistentFlags().Lookup("test-suites"))
