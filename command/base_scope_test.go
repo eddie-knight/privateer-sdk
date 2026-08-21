@@ -21,6 +21,7 @@ var runScopedFlags = map[string]string{
 	"silent":          "",
 	"write":           "",
 	"include-payload": "",
+	"concurrency":     "",
 }
 
 // TestSetBase_RegistersUniversalFlags asserts SetBase keeps the truly universal
