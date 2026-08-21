@@ -8,8 +8,9 @@ defaults.
 ## Harness keys
 
 These drive the harness (`pvtr install` / `publish` / `run` / `list`), not a
-plugin serving itself. Their flags are registered by `harness.SetHarnessFlags`
-on the CLI root.
+plugin serving itself. Their flags sit on the CLI root, except `--concurrency`,
+which only affects `pvtr run` (the flag also appears on plugin binaries, which
+share the flag set, but a plugin serving itself ignores it).
 
 <!-- markdownlint-disable MD013 -->
 
@@ -17,6 +18,7 @@ on the CLI root.
 | --- | --- | --- | --- | --- |
 | `hub-url` | `--hub-url` | `PVTR_HUB_URL` | `https://hub.grc.store` | Hub base URL. Registry host is discovered from it. |
 | `autoinstall` | `--autoinstall` | `PVTR_AUTOINSTALL` | `false` | Auto-install missing plugins before `pvtr run`. |
+| `concurrency` | `pvtr run --concurrency` | `PVTR_CONCURRENCY` | `1` | Max plugins to run at once. `1` is sequential; `0` means one per CPU. Explicit values are capped at `100` or the CPU count, whichever is larger. Negative or non-integer values are rejected as bad usage. Above `1`, plugin console output may interleave. |
 | `binaries-path` | -- | `PVTR_BINARIES_PATH` | -- | Plugin install directory. Config/env only. |
 | `benchmark` | -- | `PVTR_BENCHMARK` | `false` | Time the loader and every step; write `benchmark.json` next to results. Set by `pvtr benchmark`; env only for direct plugin runs. |
 | `benchmark-payload-only` | -- | `PVTR_BENCHMARK_PAYLOAD_ONLY` | `false` | Time the loader only and skip assessment steps. Ignored unless `benchmark` is set. |

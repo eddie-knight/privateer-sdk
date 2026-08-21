@@ -61,6 +61,11 @@ func SetRunFlags(cmd *cobra.Command) {
 
 	cmd.PersistentFlags().BoolP("include-payload", "", false, "Include the raw evaluated payload in results output (large; useful for tracing)")
 	_ = viper.BindPFlag("include-payload", cmd.PersistentFlags().Lookup("include-payload"))
+
+	// Only meaningful to harnesses running multiple plugins; a plugin binary
+	// carrying this flag simply ignores it.
+	cmd.PersistentFlags().Int("concurrency", 1, "Max plugins to run in parallel; 0 means one per CPU; capped at 100 or the CPU count, whichever is larger; must not be negative")
+	_ = viper.BindPFlag("concurrency", cmd.PersistentFlags().Lookup("concurrency"))
 }
 
 // ReadConfig reads the configuration file. If --config is explicitly provided,

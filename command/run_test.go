@@ -1,6 +1,13 @@
 package command
 
-import "testing"
+import (
+	"runtime"
+	"sync"
+	"sync/atomic"
+	"testing"
+
+	"github.com/spf13/viper"
+)
 
 func TestMergeExitCode(t *testing.T) {
 	tests := []struct {
@@ -120,4 +127,179 @@ func TestPlanRun(t *testing.T) {
 			}
 		})
 	}
+}
+
+// pkgs builds n minimal PluginPkgs; the run funcs under test never touch their
+// fields beyond identity, so empty structs suffice.
+func pkgs(n int) []*PluginPkg {
+	out := make([]*PluginPkg, n)
+	for i := range out {
+		out[i] = &PluginPkg{}
+	}
+	return out
+}
+
+func TestRunSequential(t *testing.T) {
+	t.Run("merges exit codes in order", func(t *testing.T) {
+		codes := []int{TestPass, TestFail, TestPass}
+		var ran []int
+		got := runSequential(pkgs(3), func(num int, _ *PluginPkg) (int, bool) {
+			ran = append(ran, num)
+			return codes[num-1], false
+		})
+		if got != TestFail {
+			t.Errorf("exit = %d, want %d", got, TestFail)
+		}
+		if len(ran) != 3 || ran[0] != 1 || ran[1] != 2 || ran[2] != 3 {
+			t.Errorf("ran = %v, want [1 2 3]", ran)
+		}
+	})
+
+	t.Run("plugin internal error merges and the run continues", func(t *testing.T) {
+		var calls int
+		got := runSequential(pkgs(3), func(num int, _ *PluginPkg) (int, bool) {
+			calls++
+			if num == 2 {
+				return InternalError, false
+			}
+			return TestPass, false
+		})
+		if got != InternalError {
+			t.Errorf("exit = %d, want %d", got, InternalError)
+		}
+		if calls != 3 {
+			t.Errorf("calls = %d, want 3 (a plugin's own InternalError must not abort)", calls)
+		}
+	})
+
+	t.Run("host-level failure aborts", func(t *testing.T) {
+		var calls int
+		got := runSequential(pkgs(3), func(num int, _ *PluginPkg) (int, bool) {
+			calls++
+			if num == 2 {
+				return InternalError, true
+			}
+			return TestPass, false
+		})
+		if got != InternalError {
+			t.Errorf("exit = %d, want %d", got, InternalError)
+		}
+		if calls != 2 {
+			t.Errorf("calls = %d, want 2 (abort after the failing plugin)", calls)
+		}
+	})
+}
+
+// TestConcurrencyLimit covers the default Run relies on: an unset key must read
+// as 1 (sequential), not viper's zero value — and invalid values must fail
+// closed into an error (Run returns BadUsage), never fall through to 0 and
+// silently switch on parallel execution. Valid values pass through — Run routes
+// on them with a single `!= 1`, and both arms are covered by TestRunSequential
+// and TestRunParallel.
+func TestConcurrencyLimit(t *testing.T) {
+	tests := []struct {
+		name    string
+		set     any // nil leaves the key unset
+		want    int
+		wantErr bool
+	}{
+		{"unset key defaults to 1", nil, 1, false},
+		{"explicit 1", 1, 1, false},
+		{"0 passes through", 0, 0, false},
+		{"above 1 passes through", 4, 4, false},
+		{"non-integer fails closed", "banana", 0, true},
+		{"negative fails closed", -1, 0, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resetViper()
+			t.Cleanup(resetViper)
+			if tt.set != nil {
+				viper.Set("concurrency", tt.set)
+			}
+			got, err := concurrencyLimit()
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("concurrencyLimit() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if got != tt.want {
+				t.Errorf("concurrencyLimit() = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRunParallel(t *testing.T) {
+	t.Run("bounds concurrency and merges all results", func(t *testing.T) {
+		var inFlight, peak, calls atomic.Int32
+		got := runParallel(pkgs(6), 2, func(num int, _ *PluginPkg) (int, bool) {
+			calls.Add(1)
+			n := inFlight.Add(1)
+			for p := peak.Load(); n > p; p = peak.Load() {
+				if peak.CompareAndSwap(p, n) {
+					break
+				}
+			}
+			defer inFlight.Add(-1)
+			if num == 3 {
+				// fatal=true: even a host-level failure must not abort parallel mode.
+				return InternalError, true
+			}
+			return TestPass, false
+		})
+		if got != InternalError {
+			t.Errorf("exit = %d, want %d (no early abort in parallel mode)", got, InternalError)
+		}
+		if calls.Load() != 6 {
+			t.Errorf("calls = %d, want 6", calls.Load())
+		}
+		if peak.Load() > 2 {
+			t.Errorf("peak in-flight = %d, want <= 2", peak.Load())
+		}
+	})
+
+	t.Run("limit 0 runs one per CPU", func(t *testing.T) {
+		n := runtime.NumCPU()
+		var barrier sync.WaitGroup
+		barrier.Add(n)
+		got := runParallel(pkgs(n), 0, func(int, *PluginPkg) (int, bool) {
+			// Deadlocks (and fails the test by timeout) unless all NumCPU run
+			// simultaneously.
+			barrier.Done()
+			barrier.Wait()
+			return TestPass, false
+		})
+		if got != TestPass {
+			t.Errorf("exit = %d, want %d", got, TestPass)
+		}
+	})
+
+	// The safety cap applies to an explicit limit: maxConcurrency, or NumCPU on
+	// hosts larger than that. Every worker blocks until cap are in flight, so
+	// an uncapped pool would admit all n and show a peak above the ceiling
+	// rather than deadlocking. Sizing the barrier off the effective cap (not a
+	// constant) keeps this from hanging on >100-core hosts.
+	t.Run("caps an explicit limit at max(maxConcurrency, NumCPU)", func(t *testing.T) {
+		cap := max(maxConcurrency, runtime.NumCPU())
+		n := cap + 10
+		var inFlight, peak atomic.Int32
+		var once sync.Once
+		release := make(chan struct{})
+		runParallel(pkgs(n), n, func(int, *PluginPkg) (int, bool) {
+			cur := inFlight.Add(1)
+			for p := peak.Load(); cur > p; p = peak.Load() {
+				if peak.CompareAndSwap(p, cur) {
+					break
+				}
+			}
+			if cur >= int32(cap) {
+				once.Do(func() { close(release) })
+			}
+			<-release
+			inFlight.Add(-1)
+			return TestPass, false
+		})
+		if int(peak.Load()) != cap {
+			t.Errorf("peak in-flight = %d, want exactly %d", peak.Load(), cap)
+		}
+	})
 }

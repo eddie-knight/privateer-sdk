@@ -4,10 +4,13 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"runtime"
+	"strconv"
 
 	hclog "github.com/hashicorp/go-hclog"
 	hcplugin "github.com/hashicorp/go-plugin"
 	"github.com/spf13/viper"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/privateerproj/privateer-sdk/shared"
 )
@@ -84,38 +87,110 @@ func Run(logger hclog.Logger, getPlugins func() []*PluginPkg) (exitCode int) {
 		return BadUsage
 	}
 
-	var runCount int
-	for _, pluginPkg := range toRun {
-		serviceName := pluginPkg.ServiceTarget
-		runCount++
-		client := newClient(pluginPkg.Command, logger)
-		var rpcClient hcplugin.ClientProtocol
-		rpcClient, err := client.Client()
-		if err != nil {
-			logger.Error(fmt.Sprintf("internal error while initializing %s RPC client: %s", serviceName, err))
-			pluginPkg.closeClient(serviceName, client, logger)
+	// runParallel and runSequential are mock tested with runFunc
+	// as a param, so we need to wrap runOne here to use it for real.
+	run := func(num int, pluginPkg *PluginPkg) (int, bool) {
+		return runOne(logger, num, pluginPkg)
+	}
+	limit, err := concurrencyLimit()
+	if err != nil {
+		logger.Error(err.Error())
+		return BadUsage
+	}
+	if limit != 1 {
+		return runParallel(toRun, limit, run)
+	}
+	return runSequential(toRun, run)
+}
+
+// concurrencyLimit returns the requested plugin pool size, or an error for
+// anything that is not a non-negative integer.
+func concurrencyLimit() (int, error) {
+	viper.SetDefault("concurrency", 1)
+	raw := viper.GetString("concurrency")
+	limit, err := strconv.Atoi(raw)
+	if err != nil || limit < 0 {
+		return 0, fmt.Errorf("concurrency must be a non-negative integer, got %q", raw)
+	}
+	return limit, nil
+}
+
+// runSequential executes plugins one at a time in input order, merging exit
+// codes by severity. It returns immediately only on a host-level failure.
+func runSequential(toRun []*PluginPkg, run runFunc) (exitCode int) {
+	for i, pluginPkg := range toRun {
+		code, fatal := run(i+1, pluginPkg)
+		if fatal {
 			return InternalError
 		}
-		var rawPlugin interface{}
-		rawPlugin, err = rpcClient.Dispense(shared.PluginName)
-		if err != nil {
-			logger.Error(fmt.Sprintf("internal error while dispensing RPC client: %s", err.Error()))
-			pluginPkg.closeClient(serviceName, client, logger)
-			return InternalError
-		}
-		plugin := rawPlugin.(shared.Pluginer)
-		logger.Trace(fmt.Sprintf("Starting Plugin %v: %s", runCount, pluginPkg.Name))
-		pluginExitCode, response := plugin.Start()
-		if response != nil {
-			pluginPkg.Error = fmt.Errorf("plugin %s: %v", serviceName, response)
-		}
-		pluginPkg.Successful = pluginExitCode == TestPass
-		if !pluginPkg.Successful {
-			exitCode = mergeExitCode(exitCode, pluginExitCode)
-		}
-		pluginPkg.closeClient(serviceName, client, logger)
+		exitCode = mergeExitCode(exitCode, code)
 	}
 	return exitCode
+}
+
+// maxConcurrency is the safety cap on an explicit limit: 100, or the CPU
+// count when the host is larger than that. It exists so a goofy config value
+// can't fork-bomb the machine, while a host big enough to handle the request
+// is allowed to.
+const maxConcurrency = 100
+
+// runParallel executes plugins concurrently, at most limit at a time. A limit
+// of 0 or less means one per CPU. Unlike the sequential path, it never aborts early.
+func runParallel(toRun []*PluginPkg, limit int, run runFunc) (exitCode int) {
+	if limit <= 0 {
+		limit = runtime.NumCPU()
+	}
+	limit = min(limit, max(maxConcurrency, runtime.NumCPU()))
+	codes := make([]int, len(toRun))
+	var g errgroup.Group
+	g.SetLimit(limit)
+	for i, pluginPkg := range toRun {
+		g.Go(func() error {
+			codes[i], _ = run(i+1, pluginPkg)
+			return nil
+		})
+	}
+	_ = g.Wait() // run never returns an error; Wait is only the barrier
+	for _, code := range codes {
+		exitCode = mergeExitCode(exitCode, code)
+	}
+	return exitCode
+}
+
+// runFunc executes one plugin end to end. runOne is the only production
+// implementation; this is a parameter so the sequencing and pooling can
+// be mock tested without spawning plugin subprocesses.
+type runFunc func(num int, pluginPkg *PluginPkg) (int, bool)
+
+// runOne executes a single plugin subprocess end to end recording the outcome on pluginPkg.
+// It returns the exit code and whether the failure was host-level.
+// It only touches pluginPkg's own fields, so distinct plugins are safe to run concurrently.
+func runOne(logger hclog.Logger, num int, pluginPkg *PluginPkg) (code int, fatal bool) {
+	serviceName := pluginPkg.ServiceTarget
+	client := newClient(pluginPkg.Command, logger)
+
+	rpcClient, err := client.Client()
+	if err != nil {
+		logger.Error(fmt.Sprintf("internal error while initializing %s RPC client: %s", serviceName, err))
+		pluginPkg.closeClient(serviceName, client, logger)
+		return InternalError, true
+	}
+	rawPlugin, err := rpcClient.Dispense(shared.PluginName)
+	if err != nil {
+		logger.Error(fmt.Sprintf("internal error while dispensing RPC client: %s", err.Error()))
+		pluginPkg.closeClient(serviceName, client, logger)
+		return InternalError, true
+	}
+	plugin := rawPlugin.(shared.Pluginer)
+	logger.Trace(fmt.Sprintf("Starting Plugin %v: %s", num, pluginPkg.Name))
+
+	pluginExitCode, response := plugin.Start()
+	if response != nil {
+		pluginPkg.Error = fmt.Errorf("plugin %s: %v", serviceName, response)
+	}
+	pluginPkg.Successful = pluginExitCode == TestPass
+	pluginPkg.closeClient(serviceName, client, logger)
+	return pluginExitCode, false
 }
 
 // newClient handles the lifecycle of a plugin application.
