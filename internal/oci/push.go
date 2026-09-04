@@ -22,7 +22,7 @@ const ReservedPluginSegment = "plugins"
 // PushOptions configures a push to an OCI registry.
 type PushOptions struct {
 	// RegistryHost is the scheme-stripped registry host (e.g. "localhost:5050"
-	// or "oci.grc.store"), as returned by Discovery.RegistryHost.
+	// or "oci.grc.store"), as returned by clientkit's hub.Registry.
 	RegistryHost string
 	// PlainHTTP forces http:// instead of https:// — required for the local dev
 	// zot at localhost:5050. Prod (oci.grc.store) is https, so this defaults
@@ -32,11 +32,12 @@ type PushOptions struct {
 	// (fine for a no-auth registry or anonymous pull-only checks; a push to a
 	// bearer-gated registry needs a credentialed client).
 	Client remote.Client
-	// RegistryToken is a zot registry token (from MintRegistryToken) for an
-	// authenticated push to a bearer-gated registry. When set (and Client is
-	// nil), the push client sends it directly to the registry as the access
-	// token — oras does no /v2/token exchange because we already did it. Empty
-	// keeps the anonymous default (backward-compatible).
+	// RegistryToken is a zot registry token (minted by clientkit's
+	// hub.Client.RegistryToken) for an authenticated push to a bearer-gated
+	// registry. When set (and Client is nil), the push client sends it directly
+	// to the registry as the access token — oras does no /v2/token exchange
+	// because we already did it. Empty keeps the anonymous default
+	// (backward-compatible).
 	RegistryToken string
 }
 
