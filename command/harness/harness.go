@@ -115,13 +115,34 @@ func GeneratePlugin(logger hclog.Logger) (exitCode int) {
 // than a convention each caller must remember; it is a no-op when autoinstall is
 // disabled, leaving the usual "not installed" failure.
 //
-// ctx bounds the preflight's hub/registry calls. w receives install progress and
-// is flushed before plugins start. logger and getPlugins drive the run loop.
+// When config sets `publish-results: true` (--publish-results / PVTR_PUBLISH_RESULTS),
+// the run is forced to gemara output and, once plugins finish, each completed
+// target's EvaluationLogs are published to grc.store as signed bundles (see
+// results.go and docs/configuration.md).
+//
+// ctx bounds the preflight's and publisher's hub/registry calls. w receives
+// install and publish progress and is flushed before plugins start. logger and
+// getPlugins drive the run loop.
 func Run(ctx context.Context, w Writer, logger hclog.Logger, getPlugins func() []*PluginPkg) (exitCode int) {
 	// Announce on w rather than the logger: the shipped default loglevel is
 	// error, which filters Info lines out.
 	if target := config.TargetName(); target != "" {
 		_, _ = fmt.Fprintf(w, "run scoped to target %q\n", target)
+	}
+	// --publish-results resolves its targets and license, and forces gemara
+	// output, before anything runs: a run that cannot be published is not
+	// started.
+	var plan *resultsPlan
+	if config.PublishResults() {
+		var err error
+		if plan, err = planResults(); err == nil {
+			err = forceGemaraOutput()
+		}
+		if err != nil {
+			logger.Error(fmt.Sprintf("publish-results preflight failed: %s", err))
+			_ = w.Flush()
+			return command.BadUsage
+		}
 	}
 	if err := ensureRequestedInstalled(ctx, w); err != nil {
 		logger.Error(fmt.Sprintf("autoinstall preflight failed: %s", err))
@@ -129,7 +150,20 @@ func Run(ctx context.Context, w Writer, logger hclog.Logger, getPlugins func() [
 		return command.BadUsage
 	}
 	_ = w.Flush()
-	return command.Run(logger, getPlugins) //nolint:staticcheck // intentional forwarding during migration
+	plugins := getPlugins()
+	exitCode = command.Run(logger, func() []*PluginPkg { return plugins }) //nolint:staticcheck // intentional forwarding during migration
+	if plan == nil || exitCode == command.NoTests || exitCode == command.BadUsage {
+		return exitCode
+	}
+	// Publish after the run: completed targets (pass or fail) are published,
+	// the rest skipped. A publish failure is an internal error folded into
+	// the run's code by the usual most-severe rule.
+	if err := plan.publish(ctx, w, plugins); err != nil {
+		logger.Error(fmt.Sprintf("publishing results failed: %s", err))
+		exitCode = command.MergeExitCode(exitCode, command.InternalError)
+	}
+	_ = w.Flush()
+	return exitCode
 }
 
 // GetPlugins forwards to command.GetPlugins.

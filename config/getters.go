@@ -254,3 +254,32 @@ func (c *Config) GetBoolSlice(key string) []bool {
 	}
 	return val.([]bool)
 }
+
+// PublishResults reports whether `pvtr run` publishes each target's gemara
+// EvaluationLogs to grc.store after the run (the "publish-results" key,
+// --publish-results flag, or PVTR_PUBLISH_RESULTS).
+func PublishResults() bool {
+	return viper.GetBool("publish-results")
+}
+
+// ResultsLicense is the SPDX expression stamped on published results (the
+// "results-license" key or PVTR_RESULTS_LICENSE). Required when publishing.
+func ResultsLicense() string {
+	return viper.GetString("results-license")
+}
+
+// GetServiceTarget returns the raw `target: <namespace>/<id>@<version>` value
+// declared for the service — the grc.store target its results are published
+// against. Empty when the service declares none.
+func GetServiceTarget(serviceName string) string {
+	return viper.GetString(targetsKey() + "." + serviceName + ".target")
+}
+
+// WriteDirectory returns the directory a run writes results under: the
+// "write-directory" key, else the per-process timestamped default.
+func WriteDirectory() string {
+	if dir := viper.GetString("write-directory"); dir != "" {
+		return dir
+	}
+	return defaultWritePath()
+}

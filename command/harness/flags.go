@@ -31,4 +31,12 @@ func SetHarnessFlags(cmd *cobra.Command) {
 	// PVTR_AUTOINSTALL environment variable.
 	cmd.PersistentFlags().Bool("autoinstall", false, "Before a run, install any config-requested plugins that are not yet installed")
 	_ = viper.BindPFlag("autoinstall", cmd.PersistentFlags().Lookup("autoinstall"))
+
+	// publish-results: after a `pvtr run`, publish each completed target's gemara
+	// EvaluationLogs to grc.store as signed bundles (see harness.Run). Also
+	// settable via the publish-results config.yml key or PVTR_PUBLISH_RESULTS.
+	// Needs `target: <namespace>/<id>@<version>` on every target and a
+	// results-license key; config/env only for those.
+	cmd.PersistentFlags().Bool("publish-results", false, "After the run, publish each target's evaluation logs to grc.store as signed bundles (forces output: gemara)")
+	_ = viper.BindPFlag("publish-results", cmd.PersistentFlags().Lookup("publish-results"))
 }

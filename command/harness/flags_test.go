@@ -3,15 +3,17 @@ package harness
 import (
 	"testing"
 
+	"github.com/privateerproj/privateer-sdk/config"
 	"github.com/privateerproj/privateer-sdk/internal/oci"
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 )
 
 func TestSetHarnessFlags(t *testing.T) {
 	cmd := &cobra.Command{}
 	SetHarnessFlags(cmd)
 
-	for _, name := range []string{"hub-url", "autoinstall"} {
+	for _, name := range []string{"hub-url", "autoinstall", "publish-results"} {
 		if cmd.PersistentFlags().Lookup(name) == nil {
 			t.Errorf("expected --%s flag to be registered", name)
 		}
@@ -21,5 +23,20 @@ func TestSetHarnessFlags(t *testing.T) {
 	}
 	if got := cmd.PersistentFlags().Lookup("autoinstall").DefValue; got != "false" {
 		t.Errorf("--autoinstall default = %q, want false", got)
+	}
+}
+
+func TestSetHarnessFlags_PublishResultsBinding(t *testing.T) {
+	t.Cleanup(viper.Reset)
+	cmd := &cobra.Command{}
+	SetHarnessFlags(cmd)
+	if got := cmd.PersistentFlags().Lookup("publish-results").DefValue; got != "false" {
+		t.Errorf("--publish-results default = %q, want false", got)
+	}
+	if err := cmd.PersistentFlags().Set("publish-results", "true"); err != nil {
+		t.Fatal(err)
+	}
+	if !config.PublishResults() {
+		t.Error("--publish-results should be bound to the publish-results viper key")
 	}
 }

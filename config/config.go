@@ -97,10 +97,7 @@ func NewConfig(requiredVars []string) Config {
 		loglevel = "Error"
 	}
 
-	writeDir := viper.GetString("write-directory")
-	if writeDir == "" {
-		writeDir = defaultWritePath()
-	}
+	writeDir := WriteDirectory()
 
 	topInvasive := viper.GetBool("invasive") // make sure we're actually using this to block changes
 	invasive := viper.GetBool(fmt.Sprintf("%s.%s.invasive", svcKey, serviceName))

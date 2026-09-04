@@ -37,6 +37,10 @@ var exitSeverity = map[int]int{
 	InternalError: 3,
 }
 
+// MergeExitCode returns the more severe of two exit codes, the rule a
+// multi-plugin run uses to fold per-plugin outcomes into one.
+func MergeExitCode(prev, next int) int { return mergeExitCode(prev, next) }
+
 func mergeExitCode(prev, next int) int {
 	if exitSeverity[next] > exitSeverity[prev] {
 		return next
@@ -264,6 +268,7 @@ func runOne(logger hclog.Logger, num int, pluginPkg *PluginPkg) (code int, fatal
 		pluginPkg.Error = fmt.Errorf("plugin %s: %v", serviceName, response)
 	}
 	pluginPkg.Successful = pluginExitCode == TestPass
+	pluginPkg.ExitCode = pluginExitCode
 	pluginPkg.closeClient(serviceName, client, logger)
 	return pluginExitCode, false
 }

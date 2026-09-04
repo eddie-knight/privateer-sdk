@@ -41,6 +41,7 @@ type PluginPkg struct {
 	Installed   bool
 	Requested   bool
 	Successful  bool
+	ExitCode    int // the plugin's exit code once it has run; TestPass before
 	Error       error
 }
 

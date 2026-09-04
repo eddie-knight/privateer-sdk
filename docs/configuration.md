@@ -20,6 +20,8 @@ share the flag set, but a plugin serving itself ignores it).
 | `autoinstall` | `--autoinstall` | `PVTR_AUTOINSTALL` | `false` | Auto-install missing plugins before `pvtr run`. |
 | `concurrency` | `pvtr run --concurrency` | `PVTR_CONCURRENCY` | `1` | Max plugins to run at once. `1` is sequential; `0` means one per CPU. Explicit values are capped at `100` or the CPU count, whichever is larger. Negative or non-integer values are rejected as bad usage. Above `1`, plugin console output may interleave. |
 | `binaries-path` | -- | `PVTR_BINARIES_PATH` | -- | Plugin install directory. Config/env only. |
+| `publish-results` | `--publish-results` | `PVTR_PUBLISH_RESULTS` | `false` | After `pvtr run`, publish each completed target's evaluation logs to grc.store as signed bundles. Forces `output: gemara`. See [Publishing results](#publishing-results). |
+| `results-license` | -- | `PVTR_RESULTS_LICENSE` | -- | SPDX expression stamped on published results (e.g. `CC0-1.0`). Required by `publish-results`. Config/env only. |
 | `benchmark` | -- | `PVTR_BENCHMARK` | `false` | Time the loader and every step; write `benchmark.json` next to results. Set by `pvtr benchmark`; env only for direct plugin runs. |
 | `benchmark-payload-only` | -- | `PVTR_BENCHMARK_PAYLOAD_ONLY` | `false` | Time the loader only and skip assessment steps. Ignored unless `benchmark` is set. |
 
@@ -35,6 +37,7 @@ targets:
   my-target:
     plugin: ossf/pvtr-github-repo-scanner
     version: 1.4.0   # optional; omit for the latest installed version
+    target: acme/my-repo@2.3.0   # only for publish-results: the grc.store target and its version
 ```
 
 ## Targets and the legacy `services` alias
@@ -70,6 +73,44 @@ requested but not installed are reported together in a single error; with
 `autoinstall: true`, the install preflight still stops at the first plugin
 that fails to install. `pvtr install --from-config` always installs the whole
 config regardless of any target setting.
+
+## Publishing results
+
+`pvtr run --publish-results` (or `publish-results: true` / `PVTR_PUBLISH_RESULTS`)
+publishes every completed target's Gemara `EvaluationLog`s to grc.store as
+signed OCI bundles, one bundle per log, after the run.
+
+Requirements, all checked before any plugin starts:
+
+- `output` must be `gemara` or unset; the run is forced to gemara output and
+  any other explicit value is an error.
+- Every target in scope needs `target: <namespace>/<id>@<version>`: the
+  grc.store target the results describe, owned by `<namespace>` (the target
+  owner's org, never the plugin publisher), and the version of it that was
+  evaluated. `<namespace>` and `<id>` must be hub slugs (lowercase letters,
+  digits, `.`, single `-`).
+- `results-license` must be a valid SPDX expression.
+- Credentials: the hub bearer (`PVTR_TOKEN`, `pvtr login`, or the GitHub
+  Actions trusted-publishing token) and the Sigstore signing identity
+  (`SIGSTORE_ID_TOKEN`, or auto-detected in GitHub Actions). See
+  [ci-publishing.md](./ci-publishing.md).
+
+Each log is published at `<namespace>/<id>-<catalog-id>` with tag and
+`metadata.version` both `<version>-<UTC run timestamp>` (e.g.
+`2.3.0-20260904T101500Z`). `metadata.id` is stamped `<id>_<catalog-id>` and
+`target.version` is filled in when the plugin left it empty; `metadata.author`
+(the evaluator) is left exactly as the plugin wrote it. Catalog ids must also
+be hub slugs, or the publish fails before anything is pushed.
+
+Partial failure: a target is published when its plugin exited pass **or**
+fail (failing results are still the honest record); targets whose plugin
+aborted or errored are skipped with a notice. Publishing stops at the first
+publish error and the run exits with an internal error; bundles already
+published stay, since each is its own immutable coordinate.
+
+Caveats: a target version containing `-rc` makes the hub treat every log for
+it as a release candidate. The hub pins the first signer per coordinate, so
+publish a given target from one place (CI or a laptop), not both.
 
 ## Publishing from CI
 
