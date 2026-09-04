@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/gemaraproj/grc-store-clientkit/hub"
 	"oras.land/oras-go/v2/registry/remote/auth"
 )
 
@@ -97,5 +98,21 @@ func TestNewPluginRepository_Validation(t *testing.T) {
 	}
 	if _, err := newPluginRepository(PushOptions{RegistryHost: "h"}, "noslash"); err == nil {
 		t.Error("expected error for invalid coordinate")
+	}
+}
+
+// The registry repository path has two independent definitions: pluginRepoPath
+// builds the push reference here, and clientkit's hub.PluginRepository builds the
+// token scope and the sync body. The hub compares them byte-for-byte, so a drift
+// between the two would mint for one repo and push to another. Nothing but this
+// test pins them together.
+func TestPluginRepoPath_MatchesClientkit(t *testing.T) {
+	for _, c := range []struct{ ns, id string }{
+		{"acme", "hello"},
+		{"acme-org", "my.plugin_v2"},
+	} {
+		if got, want := pluginRepoPath(c.ns, c.id), hub.PluginRepository(c.ns, c.id); got != want {
+			t.Errorf("pluginRepoPath(%q, %q) = %q, clientkit hub.PluginRepository = %q", c.ns, c.id, got, want)
+		}
 	}
 }
