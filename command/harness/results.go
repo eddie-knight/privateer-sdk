@@ -27,8 +27,7 @@ type resultsPlan struct {
 // license from config for every target in scope. It fails closed: a target
 // without a parseable `target: <namespace>/<id>@<version>` cannot be
 // published, so the run does not start. Two targets naming the same
-// coordinate would publish to the same tag, the second silently re-pointing
-// it, so that is refused too.
+// coordinate would publish to the same tag, so that is refused too.
 func planResults() (*resultsPlan, error) {
 	license, err := results.License(config.ResultsLicense())
 	if err != nil {

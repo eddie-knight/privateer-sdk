@@ -167,9 +167,8 @@ func Publish(ctx context.Context, w io.Writer, p Params) error {
 		return nil
 	}
 
-	// 7. Real publish: discover the hub's registry + OIDC coordinates, get an
-	//    authenticated bearer (login store or PVTR_TOKEN), mint a push-scoped
-	//    registry token, authenticated push, then sync.
+	// 7. Real publish: connect to the hub (discovery + bearer), mint a
+	//    push-scoped registry token, authenticated push, then sync.
 	ns, pid, ok := oci.SplitCoordinate(coordinate)
 	if !ok {
 		return fmt.Errorf("invalid coordinate %q: want <namespace>/<plugin_id>", coordinate)

@@ -60,8 +60,7 @@ func TestGetBinary_ResolvesViaManifest(t *testing.T) {
 }
 
 // TestQueueCmd_ForwardsOutputSettings verifies the host's output format and
-// write directory reach the plugin as flags, whichever of flag, env, or
-// config set them on the host.
+// write directory reach the plugin as flags.
 func TestQueueCmd_ForwardsOutputSettings(t *testing.T) {
 	t.Cleanup(viper.Reset)
 	viper.Set("output", "gemara")

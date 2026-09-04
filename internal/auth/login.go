@@ -115,16 +115,15 @@ func BearerToken(ctx context.Context, issuer, clientID string) (string, error) {
 // Hub is a discovered hub plus the bearer that authenticates writes to it.
 type Hub struct {
 	Discovery *discovery.Document
-	Registry  string // registry host
+	Registry  string
 	PlainHTTP bool
 	Bearer    string
 }
 
-// ConnectHub discovers hubURL and resolves the write bearer, the one
-// credential sequence `pvtr publish` and `pvtr run --publish-results` share
-// so their auth policies cannot drift: PVTR_TOKEN or the `pvtr login` store
-// first (BearerToken), else the GitHub Actions trusted-publishing token when
-// running there. This is not the signing identity; see keyless.Identity.
+// ConnectHub discovers hubURL and resolves the write bearer: PVTR_TOKEN or
+// the `pvtr login` store first (BearerToken), else the GitHub Actions
+// trusted-publishing token when running there. This is not the signing
+// identity; see keyless.Identity.
 func ConnectHub(ctx context.Context, hubURL string) (*Hub, error) {
 	disco, err := hub.Discover(ctx, hubURL)
 	if err != nil {

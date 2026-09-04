@@ -53,8 +53,7 @@ func (t Target) Tag(runID string) string { return t.Version + "-" + runID }
 // ParseTarget parses "<namespace>/<id>@<version>". All three parts are
 // required; namespace and id must already be hub slugs (see slugRe) so the
 // repository this code composes equals what the hub derives from metadata.id,
-// and version must make a legal OCI tag. Everything the tag and repository
-// are composed from is validated here, before any plugin runs.
+// and version must make a legal OCI tag.
 func ParseTarget(raw string) (Target, error) {
 	coord, version, ok := strings.Cut(strings.TrimSpace(raw), "@")
 	ns, id, ok2 := oci.SplitCoordinate(coord)
@@ -67,8 +66,8 @@ func ParseTarget(raw string) (Target, error) {
 			return Target{}, fmt.Errorf("target %s %q is not a hub slug (%s)", part.what, part.v, slugHint)
 		}
 	}
-	// Every run id has the same width and tag-legal characters, so a
-	// placeholder validates the tag every real run will compose.
+	// RunID is fixed-width and tag-legal, so a placeholder run id validates
+	// the tag every real run will compose.
 	if err := (registry.Reference{Reference: t.Tag(RunID(time.Time{}))}).ValidateReferenceAsTag(); err != nil {
 		return Target{}, fmt.Errorf("target version %q does not make a legal OCI tag: %w", version, err)
 	}
@@ -285,8 +284,7 @@ func loadService(p Params, svc Service, runID string) ([]stamped, error) {
 }
 
 // resolveCreds resolves the two independent identities a publish needs: the
-// hub bearer (the sequence shared with `pvtr publish`, see auth.ConnectHub)
-// and the public-good Fulcio signing identity.
+// hub bearer (auth.ConnectHub) and the public-good Fulcio signing identity.
 func resolveCreds(ctx context.Context, w io.Writer, hubURL string) (creds, error) {
 	h, err := auth.ConnectHub(ctx, hubURL)
 	if err != nil {

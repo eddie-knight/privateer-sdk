@@ -48,8 +48,8 @@ type PluginPkg struct {
 	Installed   bool
 	Requested   bool
 	Successful  bool
-	Ran         bool // Start() returned; ExitCode is meaningful only when set
-	ExitCode    int  // the plugin's exit code once it has run (its zero value is TestPass, hence Ran)
+	Ran         bool // Start() returned
+	ExitCode    int  // the plugin's exit code; zero (TestPass) until Ran
 	Error       error
 }
 
@@ -78,8 +78,8 @@ func (p *PluginPkg) getBinary() (binaryPath string, err error) {
 }
 
 // queueCmd builds the plugin command line. Output format and directory are
-// forwarded explicitly so host and plugin agree on where results land and in
-// what format, whichever of flag, env, or config set them on the host.
+// read from viper so the plugin gets them however the host set them (flag,
+// env, or config).
 func (p *PluginPkg) queueCmd() {
 	cmd := exec.Command(p.Path)
 	cmd.Args = append(cmd.Args,
