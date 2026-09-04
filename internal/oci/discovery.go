@@ -19,8 +19,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gemaraproj/grc-store-clientkit/hub"
-	"github.com/revanite-io/grc-store-protocol/discovery"
 	"github.com/spf13/viper"
 )
 
@@ -42,12 +40,6 @@ const hubURLKey = "hub-url"
 // already honors it via AutomaticEnv.
 const hubURLEnv = "PVTR_HUB_URL"
 
-// Discovery is the hub's well-known configuration document, aliased to the
-// shared wire-contract type — the same definition the hub serves and grcli
-// consumes, so the three cannot drift. It replaced a hand-copied four-field
-// struct that was missing ui_url, api_version and ci_audience.
-type Discovery = discovery.Document
-
 // HubURL returns the configured hub base URL with no trailing slash. Resolution
 // precedence: the "hub-url" config key (config.yml or PVTR_HUB_URL env, via
 // viper) first, then the PVTR_HUB_URL environment variable read directly (a
@@ -63,9 +55,10 @@ func HubURL() string {
 	return strings.TrimRight(base, "/")
 }
 
-// Client fetches the hub discovery document. It is intentionally tiny — a
-// base URL and an HTTP client — so both publish and install share one
-// resolution path.
+// Client issues the anonymous hub JSON calls that stay pvtr's own (Browse,
+// GetPluginDetails). Discovery is not one of them: call
+// grc-store-clientkit/hub.Discover(ctx, c.BaseURL()) so the fetch, its
+// registry_url check and its per-URL cache are the same code grcli runs.
 type Client struct {
 	baseURL    string
 	httpClient *http.Client
@@ -140,13 +133,4 @@ func (c *Client) getJSON(ctx context.Context, path string, out any) error {
 		}
 	}
 	return nil
-}
-
-// Discover fetches and validates the hub's well-known configuration document.
-// The fetch, the registry_url presence check, and the per-URL cache live in
-// grc-store-clientkit so pvtr and grcli ask the hub the same question the same
-// way. Use hub.Registry(d) to turn the advertised registry_url into a dial
-// target.
-func (c *Client) Discover(ctx context.Context) (*Discovery, error) {
-	return hub.Discover(ctx, c.baseURL)
 }

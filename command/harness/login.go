@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/gemaraproj/grc-store-clientkit/hub"
 	"github.com/privateerproj/privateer-sdk/internal/auth"
 	"github.com/privateerproj/privateer-sdk/internal/oci"
 	"github.com/spf13/cobra"
@@ -33,7 +34,7 @@ func runLogin(ctx context.Context, writer Writer) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	disco, err := oci.NewClient().Discover(ctx)
+	disco, err := hub.Discover(ctx, oci.HubURL())
 	if err != nil {
 		return fmt.Errorf("hub discovery (hub %s): %w", oci.HubURL(), err)
 	}
@@ -61,7 +62,7 @@ func logoutCmd(writerFn func() Writer) *cobra.Command {
 			if ctx == nil {
 				ctx = context.Background()
 			}
-			disco, err := oci.NewClient().Discover(ctx)
+			disco, err := hub.Discover(ctx, oci.HubURL())
 			if err != nil {
 				return fmt.Errorf("hub discovery: %w", err)
 			}

@@ -167,7 +167,7 @@ func pullVerifyInstall(ctx context.Context, w io.Writer, hub *oci.Client, detail
 }
 
 func fetchIndex(ctx context.Context, w io.Writer, hub *oci.Client, release *oci.PluginRelease, coordinate string) (index *oci.FetchedIndex, err error) {
-	remote, err := hub.Discover(ctx)
+	remote, err := ckhub.Discover(ctx, hub.BaseURL())
 	if err != nil {
 		err = fmt.Errorf("hub discovery: %w", err)
 		return
