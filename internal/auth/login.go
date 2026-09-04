@@ -26,6 +26,11 @@ var pvtrApp = clientauth.App{Name: "pvtr", TokenEnv: "PVTR_TOKEN"}
 // Login runs the device-authorization grant against the issuer and stores the
 // resulting credentials. promptOut receives the user-facing "open this URL,
 // enter this code" message. It returns the canonical issuer it logged into.
+// LoginHint is the "run `pvtr login`" fragment. Shared code in
+// grc-store-clientkit never names a tool, so callers wrap its sentinels with
+// this.
+func LoginHint() string { return pvtrApp.LoginHint() }
+
 func Login(ctx context.Context, issuer, clientID string, promptOut io.Writer) (string, error) {
 	if clientID == "" {
 		return "", errors.New("the hub discovery doc did not advertise oidc_cli_client_id; cannot run device login")

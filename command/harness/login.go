@@ -40,7 +40,7 @@ func runLogin(ctx context.Context, writer Writer) error {
 	if disco.OIDCIssuer == "" {
 		return fmt.Errorf("the hub at %s does not advertise an OIDC issuer; `pvtr login` is not supported there", oci.HubURL())
 	}
-	issuer, err := auth.Login(ctx, disco.OIDCIssuer, disco.OIDCClientID, writer)
+	issuer, err := auth.Login(ctx, disco.OIDCIssuer, disco.OIDCCLIClientID, writer)
 	if err != nil {
 		return err
 	}
