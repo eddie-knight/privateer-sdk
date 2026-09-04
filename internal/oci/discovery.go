@@ -67,18 +67,12 @@ type Client struct {
 // NewClient builds a discovery client against the configured hub
 // (PVTR_HUB_URL, default DefaultHubURL).
 func NewClient() *Client {
-	return newHubClient(HubURL(), defaultHubTimeout)
+	return &Client{baseURL: HubURL(), httpClient: &http.Client{Timeout: hubTimeout}}
 }
 
-// defaultHubTimeout bounds a single hub JSON API call.
-const defaultHubTimeout = 15 * time.Second
-
-// newHubClient returns a hub Client targeting baseURL with the given per-request
-// timeout. Callers needing a longer bound than the default (e.g. /sync, which does
-// server-side signature verification) pass their own.
-func newHubClient(baseURL string, timeout time.Duration) *Client {
-	return &Client{baseURL: baseURL, httpClient: &http.Client{Timeout: timeout}}
-}
+// hubTimeout bounds a single hub JSON API call. One bound serves every call this
+// client makes: they are all anonymous GETs returning small documents.
+const hubTimeout = 15 * time.Second
 
 // BaseURL returns the hub base URL this client targets.
 func (c *Client) BaseURL() string { return c.baseURL }
