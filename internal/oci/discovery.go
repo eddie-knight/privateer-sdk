@@ -15,7 +15,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -41,24 +40,6 @@ const hubURLKey = "hub-url"
 // already honors it via AutomaticEnv.
 const hubURLEnv = "PVTR_HUB_URL"
 
-// wellKnownPath is the discovery document path served by the hub
-// this should remain consistent for self-hosted registries as well
-const wellKnownPath = "/.well-known/grc-store-configuration"
-
-// Discovery is the subset of the hub's /.well-known/grc-store-configuration document
-// that pvtr consumes. Only the fields pvtr acts on are decoded — registry_url
-// (push/pull target), hub_url (for the claim-namespace hint), and the OIDC
-// coordinates publish/login need; unknown fields are ignored.
-type Discovery struct {
-	// RegistryURL is the OCI registry origin WITH scheme (e.g.
-	// http://localhost:5050). Use RegistryHost to get the scheme-stripped
-	// host an oras/Docker reference needs.
-	RegistryURL  string `json:"registry_url"`
-	HubURL       string `json:"hub_url"`
-	OIDCIssuer   string `json:"oidc_issuer,omitempty"`
-	OIDCClientID string `json:"oidc_cli_client_id,omitempty"`
-}
-
 // HubURL returns the configured hub base URL with no trailing slash. Resolution
 // precedence: the "hub-url" config key (config.yml or PVTR_HUB_URL env, via
 // viper) first, then the PVTR_HUB_URL environment variable read directly (a
@@ -74,9 +55,10 @@ func HubURL() string {
 	return strings.TrimRight(base, "/")
 }
 
-// Client fetches the hub discovery document. It is intentionally tiny — a
-// base URL and an HTTP client — so both publish and install share one
-// resolution path.
+// Client issues pvtr's anonymous hub JSON calls: Browse and GetPluginDetails.
+// For the well-known discovery document use grc-store-clientkit's
+// hub.Discover(ctx, c.BaseURL()), which owns the fetch, the registry_url check
+// and the per-URL cache.
 type Client struct {
 	baseURL    string
 	httpClient *http.Client
@@ -124,45 +106,24 @@ func (e *httpStatusError) Error() string {
 	return fmt.Sprintf("%s %s returned status %d", method, e.endpoint, e.status)
 }
 
-// doJSON is the shared HTTP request helper for all hub API calls. It:
-//   - builds a request with the given method and path (relative to c.baseURL);
-//   - marshals reqBody as JSON and sets Content-Type when reqBody is non-nil;
-//   - sets Authorization: Bearer <bearer> when bearer is non-empty;
-//   - on non-200, captures a bounded body snippet (4 KiB) and returns an
-//     *httpStatusError — preserving actionable hub error codes (e.g.
-//     plugin_unsigned) in error messages for POST endpoints;
-//   - on 200, decodes the response body into out (when out is non-nil).
-//
-// It is the one place the build-request → Do → status → decode dance lives.
-// getJSON is a thin convenience wrapper for anonymous GETs that decode into out.
-func (c *Client) doJSON(ctx context.Context, method, path, bearer string, reqBody, out any) error {
+// getJSON performs an anonymous GET against the hub and decodes a 200 response
+// body into out. Every hub call from this package is an anonymous GET (Browse,
+// GetPluginDetails). A non-200 yields an *httpStatusError so a caller can
+// inspect the code, preserving actionable hub error codes in messages.
+func (c *Client) getJSON(ctx context.Context, path string, out any) error {
 	endpoint := c.baseURL + path
-	var bodyReader io.Reader
-	if reqBody != nil {
-		data, err := json.Marshal(reqBody)
-		if err != nil {
-			return fmt.Errorf("encoding request body for %s: %w", endpoint, err)
-		}
-		bodyReader = bytes.NewReader(data)
-	}
-	req, err := http.NewRequestWithContext(ctx, method, endpoint, bodyReader)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return fmt.Errorf("building request for %s: %w", endpoint, err)
 	}
-	if reqBody != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
-	if bearer != "" {
-		req.Header.Set("Authorization", "Bearer "+bearer)
-	}
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("%s %s: %w", method, endpoint, err)
+		return fmt.Errorf("GET %s: %w", endpoint, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		detail, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
-		return &httpStatusError{method: method, endpoint: endpoint, status: resp.StatusCode, body: string(bytes.TrimSpace(detail))}
+		return &httpStatusError{method: http.MethodGet, endpoint: endpoint, status: resp.StatusCode, body: string(bytes.TrimSpace(detail))}
 	}
 	if out != nil {
 		if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
@@ -170,75 +131,4 @@ func (c *Client) doJSON(ctx context.Context, method, path, bearer string, reqBod
 		}
 	}
 	return nil
-}
-
-// getJSON performs an anonymous GET against the hub and decodes a 200 response
-// body into out. It is a thin wrapper over doJSON for the common anonymous-GET
-// case (Discover, Browse, GetPluginDetails). A non-200 yields an *httpStatusError
-// so a caller can inspect the code.
-func (c *Client) getJSON(ctx context.Context, path string, out any) error {
-	return c.doJSON(ctx, http.MethodGet, path, "", nil, out)
-}
-
-// Discover fetches and decodes the hub's /.well-known/grc-store-configuration document.
-func (c *Client) Discover(ctx context.Context) (*Discovery, error) {
-	var d Discovery
-	if err := c.getJSON(ctx, wellKnownPath, &d); err != nil {
-		return nil, err
-	}
-	if strings.TrimSpace(d.RegistryURL) == "" {
-		return nil, fmt.Errorf("discovery document from %s%s has no registry_url", c.baseURL, wellKnownPath)
-	}
-	return &d, nil
-}
-
-// parseRegistryURL normalises registry_url into a *url.URL, applying the same
-// whitespace-trimming that RegistryHost uses. It is the shared parse step that
-// both RegistryHost and PlainHTTP delegate to so neither can drift.
-//
-// Values without a "scheme://" prefix are treated as bare host[:port] strings
-// (no scheme → neither http:// nor https://). url.Parse mis-parses bare
-// "localhost:5050" as scheme="localhost", opaque="5050", so we only call it
-// when the separator is present.
-func (d *Discovery) parseRegistryURL() (*url.URL, error) {
-	raw := strings.TrimSpace(d.RegistryURL)
-	if raw == "" {
-		return nil, fmt.Errorf("registry_url is empty")
-	}
-	if !strings.Contains(raw, "://") {
-		// No scheme present — treat as a bare host[:port] with an implied https.
-		return &url.URL{Scheme: "https", Host: strings.TrimRight(raw, "/")}, nil
-	}
-	u, err := url.Parse(raw)
-	if err != nil {
-		return nil, fmt.Errorf("parsing registry_url %q: %w", raw, err)
-	}
-	if u.Host == "" {
-		return nil, fmt.Errorf("registry_url %q has no host", raw)
-	}
-	return u, nil
-}
-
-// RegistryHost returns the OCI registry host (no scheme, no trailing slash)
-// to build an oras/Docker reference from. registry_url is advertised WITH a
-// scheme but OCI references are host[:port]-only, so the scheme is
-// stripped here — part of the same single-point-of-truth as PlainHTTP.
-func (d *Discovery) RegistryHost() (string, error) {
-	u, err := d.parseRegistryURL()
-	if err != nil {
-		return "", err
-	}
-	return strings.TrimRight(u.Host, "/"), nil
-}
-
-// PlainHTTP reports whether the discovered registry_url uses http:// (local
-// dev registries) and therefore requires plain-HTTP transport instead of TLS.
-// Part of the same single-point-of-truth as RegistryHost — both delegate to
-// parseRegistryURL so the scheme interpretation can never drift between them.
-func (d *Discovery) PlainHTTP() bool {
-	u, err := d.parseRegistryURL()
-	if err != nil {
-		return false
-	}
-	return u.Scheme == "http"
 }

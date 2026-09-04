@@ -98,7 +98,7 @@ func newPluginRepository(opts PushOptions, coordinate string) (*remote.Repositor
 	if opts.RegistryHost == "" {
 		return nil, fmt.Errorf("registry host is required")
 	}
-	ns, id, ok := splitCoordinate(coordinate)
+	ns, id, ok := SplitCoordinate(coordinate)
 	if !ok {
 		return nil, fmt.Errorf("invalid coordinate %q: want <namespace>/<plugin_id>", coordinate)
 	}
@@ -141,8 +141,11 @@ func pluginRepoPath(ns, id string) string {
 	return ns + "/" + ReservedPluginSegment + "/" + id
 }
 
-// splitCoordinate splits "<namespace>/<plugin_id>" into its parts.
-func splitCoordinate(coordinate string) (ns, id string, ok bool) {
+// SplitCoordinate splits "<namespace>/<plugin_id>" into its parts. It is the
+// single parse for a coordinate: the registry-token scope, the push repository
+// path and the sync route must all name the same repo, so every caller splits
+// through here instead of doing its own strings.Cut.
+func SplitCoordinate(coordinate string) (ns, id string, ok bool) {
 	parts := strings.SplitN(strings.TrimSpace(coordinate), "/", 2)
 	if len(parts) != 2 || parts[0] == "" || parts[1] == "" || strings.Contains(parts[1], "/") {
 		return "", "", false
