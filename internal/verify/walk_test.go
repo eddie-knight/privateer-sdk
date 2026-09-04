@@ -382,7 +382,7 @@ func TestIndex_MultiBundleFirstFailsIdentitySecondPasses(t *testing.T) {
 }
 
 // TestIndex_MultiBundle_ViaAttachDiscover verifies the end-to-end multi-bundle
-// path: two bundles attached (via AttachSignature) to the same index descriptor,
+// path: two bundles attached (via oci.SignAndAttach) to the same index descriptor,
 // both discovered (via FetchSignature which now returns all bundles), then
 // passed to verify.Index. Both are fixture bytes (invalid signatures), so the
 // loop tries both and returns ErrSignatureInvalid — proving that the referrer
