@@ -55,10 +55,10 @@ func HubURL() string {
 	return strings.TrimRight(base, "/")
 }
 
-// Client issues the anonymous hub JSON calls that stay pvtr's own (Browse,
-// GetPluginDetails). Discovery is not one of them: call
-// grc-store-clientkit/hub.Discover(ctx, c.BaseURL()) so the fetch, its
-// registry_url check and its per-URL cache are the same code grcli runs.
+// Client issues pvtr's anonymous hub JSON calls: Browse and GetPluginDetails.
+// For the well-known discovery document use grc-store-clientkit's
+// hub.Discover(ctx, c.BaseURL()), which owns the fetch, the registry_url check
+// and the per-URL cache.
 type Client struct {
 	baseURL    string
 	httpClient *http.Client
@@ -107,11 +107,9 @@ func (e *httpStatusError) Error() string {
 }
 
 // getJSON performs an anonymous GET against the hub and decodes a 200 response
-// body into out. Every remaining hub call from this package is an anonymous
-// GET (Browse, GetPluginDetails); the authenticated calls — registry-token mint
-// and plugin sync — moved to grc-store-clientkit/hub. A non-200 yields an
-// *httpStatusError so a caller can inspect the code, preserving actionable hub
-// error codes in messages.
+// body into out. Every hub call from this package is an anonymous GET (Browse,
+// GetPluginDetails). A non-200 yields an *httpStatusError so a caller can
+// inspect the code, preserving actionable hub error codes in messages.
 func (c *Client) getJSON(ctx context.Context, path string, out any) error {
 	endpoint := c.baseURL + path
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)

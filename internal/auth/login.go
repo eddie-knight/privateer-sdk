@@ -1,8 +1,7 @@
 // Package auth authenticates `pvtr publish` against grc.store. The
 // device-grant login, credential store, and token resolution come from
 // grc-store-clientkit; this package supplies pvtr's App identity and prompt
-// wording, plus the Sigstore signing identity in signing.go, which is a
-// separate token from a separate issuer.
+// wording.
 //
 // The consumer (install) path is anonymous and does not use this package.
 package auth
@@ -26,11 +25,6 @@ var pvtrApp = clientauth.App{Name: "pvtr", TokenEnv: "PVTR_TOKEN"}
 // Login runs the device-authorization grant against the issuer and stores the
 // resulting credentials. promptOut receives the user-facing "open this URL,
 // enter this code" message. It returns the canonical issuer it logged into.
-// LoginHint is the "run `pvtr login`" fragment. Shared code in
-// grc-store-clientkit never names a tool, so callers wrap its sentinels with
-// this.
-func LoginHint() string { return pvtrApp.LoginHint() }
-
 func Login(ctx context.Context, issuer, clientID string, promptOut io.Writer) (string, error) {
 	if clientID == "" {
 		return "", errors.New("the hub discovery doc did not advertise oidc_cli_client_id; cannot run device login")
@@ -69,6 +63,11 @@ func Login(ctx context.Context, issuer, clientID string, promptOut io.Writer) (s
 	return creds.Issuer, nil
 }
 
+// LoginHint is the "run `pvtr login`" fragment. Shared code in
+// grc-store-clientkit never names a tool, so callers wrap its sentinels with
+// this.
+func LoginHint() string { return pvtrApp.LoginHint() }
+
 // Logout forgets stored credentials for the issuer.
 func Logout(issuer string) error {
 	store, err := clientauth.NewDefaultStore(pvtrApp)
@@ -89,7 +88,8 @@ func Logout(issuer string) error {
 // login`.
 //
 // This is not a signing identity; Fulcio trusts public OIDC issuers, not the
-// grc.store Keycloak. See SigningIDToken.
+// grc.store Keycloak. The signing identity comes from grc-store-clientkit's
+// keyless.Identity, resolved separately at publish time.
 func BearerToken(ctx context.Context, issuer, clientID string) (string, error) {
 	in := clientauth.ResolveInput{
 		App:      pvtrApp,

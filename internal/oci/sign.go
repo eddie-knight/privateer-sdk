@@ -15,14 +15,8 @@ import (
 // Sigstore bundle as an OCI 1.1 referrer of the index — the step `cosign sign`
 // would otherwise perform.
 //
-// The signer and the referrer attach both come from grc-store-clientkit, so a
-// plugin index and a Gemara catalog bundle are signed and stamped identically.
 // The signed payload is a DSSE-wrapped in-toto Statement v1 whose single
-// subject digest is the index digest. Plugins published before this change
-// carry a message signature over the raw index bytes instead; both shapes bind
-// the same digest and both verify under the artifact-digest policy in
-// internal/verify, so the mixed cohort in the registry needs no re-signing (see
-// TestVerifyIndex_AcceptsBothSignatureShapes).
+// subject digest is the index digest.
 //
 // idToken is the public-good Fulcio identity from keyless.Identity. It is NOT
 // the hub bearer: Fulcio trusts public OIDC issuers, not the grc.store auth

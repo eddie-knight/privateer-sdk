@@ -28,8 +28,8 @@ func (noTlogEntity) TlogEntries() ([]*tlog.Entry, error) { return nil, nil }
 func (noTlogEntity) HasInclusionProof() bool             { return false }
 func (noTlogEntity) HasInclusionPromise() bool           { return false }
 
-// TestProducerConsumer_AttachThenVerifyDiscoversReferrer proves the producer's
-// clientkit's AttachReferrer is wired as the exact inverse of the consumer's verify
+// TestProducerConsumer_AttachThenVerifyDiscoversReferrer proves that clientkit's
+// AttachReferrer is wired as the exact inverse of the consumer's verify
 // path THROUGH THE OCI REFERRER GRAPH: attach a bundle to the index in a store,
 // discover it back, feed verify.Index — and confirm verify GETS THE SIGNATURE
 // (it does not see ErrUnsigned; it proceeds to signature verification). The

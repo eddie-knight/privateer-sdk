@@ -54,9 +54,9 @@ func TestSplitCoordinate(t *testing.T) {
 		{"", "", "", false},
 	}
 	for _, c := range cases {
-		ns, id, ok := splitCoordinate(c.in)
+		ns, id, ok := SplitCoordinate(c.in)
 		if ok != c.ok || ns != c.ns || id != c.id {
-			t.Errorf("splitCoordinate(%q) = (%q,%q,%v), want (%q,%q,%v)", c.in, ns, id, ok, c.ns, c.id, c.ok)
+			t.Errorf("SplitCoordinate(%q) = (%q,%q,%v), want (%q,%q,%v)", c.in, ns, id, ok, c.ns, c.id, c.ok)
 		}
 	}
 }

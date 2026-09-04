@@ -101,7 +101,4 @@ func TestNewClient_UsesConfiguredHub(t *testing.T) {
 	}
 }
 
-// Discovery fetch/validation and registry_url parsing now live in
-// grc-store-clientkit/hub (Discover, Registry) and are tested there. What stays
-// pvtr's own is the hub-URL resolution below: the viper key, the PVTR_ env
-// prefix, and the default.
+// Hub-URL resolution: the viper key, the PVTR_ env prefix, and the default.

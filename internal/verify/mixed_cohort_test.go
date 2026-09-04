@@ -12,24 +12,16 @@ import (
 	"github.com/sigstore/sigstore-go/pkg/testing/ca"
 )
 
-// TestVerifyIndex_AcceptsBothSignatureShapes is the guard on the mixed cohort
-// this repo's clientkit adoption creates.
-//
-// Plugins published before the adoption are signed as a MESSAGE SIGNATURE over
-// the raw index bytes (the old oci.SignIndex, sign.PlainData). Everything
-// published after is signed as a DSSE-wrapped in-toto Statement v1 whose single
-// subject digest is the index digest (clientkit's keyless.Signer, the shared
-// shape grcli already emitted for catalogs). The registry therefore holds both
-// shapes indefinitely.
+// TestVerifyIndex_AcceptsBothSignatureShapes guards the two signature shapes the
+// registry holds indefinitely: a message signature over the raw index bytes, and
+// a DSSE-wrapped in-toto Statement v1 whose single subject digest is the index
+// digest. Both bind the same digest.
 //
 // Nothing in this package inspects the payload shape: the policy is built with
-// WithArtifactDigest, and sigstore-go dispatches on the bundle's content —
-// digest compare for a message signature, in-toto subject compare for a DSSE
-// envelope. So both shapes verify against the same digest with no verifier
-// change, and no re-sign campaign is needed. This test exists so that stays
-// true by decision rather than by accident: if someone later pins a payload
-// type, every plugin published before the switch stops verifying, and this
-// fails first.
+// WithArtifactDigest and sigstore-go dispatches on the bundle's content — digest
+// compare for a message signature, in-toto subject compare for a DSSE envelope.
+// This test keeps that true by decision rather than by accident: pin a payload
+// type later and one of the two shapes stops verifying here first.
 func TestVerifyIndex_AcceptsBothSignatureShapes(t *testing.T) {
 	vs, err := ca.NewVirtualSigstore()
 	if err != nil {

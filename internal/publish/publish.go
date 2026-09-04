@@ -179,7 +179,10 @@ func Publish(ctx context.Context, w io.Writer, p Params) error {
 	if err != nil {
 		return fmt.Errorf("resolving registry host: %w", err)
 	}
-	ns, pid, _ := strings.Cut(coordinate, "/")
+	ns, pid, ok := oci.SplitCoordinate(coordinate)
+	if !ok {
+		return fmt.Errorf("invalid coordinate %q: want <namespace>/<plugin_id>", coordinate)
+	}
 
 	bearer, err := auth.BearerToken(ctx, disco.OIDCIssuer, disco.OIDCCLIClientID)
 	if err != nil {
@@ -200,7 +203,7 @@ func Publish(ctx context.Context, w io.Writer, p Params) error {
 	if !regToken.GrantsPush() {
 		return fmt.Errorf("publishing to %s/%s/%s requires ownership of namespace %q — create or claim it first (e.g. at %s/%s, or POST %s/v1/orgs), then re-publish",
 			ns, oci.ReservedPluginSegment, pid,
-			ns, uiBaseFromHub(disco.HubURL), ns, hubURL)
+			ns, uiBase(disco.UIURL, disco.HubURL), ns, hubURL)
 	}
 
 	pushOpts := oci.PushOptions{
@@ -240,6 +243,11 @@ func Publish(ctx context.Context, w io.Writer, p Params) error {
 
 	_, _ = fmt.Fprintf(w, "Syncing %s:%s to the hub...\n", coordinate, version)
 	if err := client.SyncPlugin(ctx, ns, pid, version); err != nil {
+		// A bearer that was good at the mint can expire during a large push, so
+		// the 401 gets the same login hint the mint gives.
+		if errors.Is(err, hub.ErrUnauthorized) {
+			return fmt.Errorf("hub sync: %w — %s again", err, auth.LoginHint())
+		}
 		// The hub verifies the signature at ingest; it surfaces actionable codes
 		// (plugin_signer_mismatch, registry_diverged, …) — pass them verbatim.
 		return fmt.Errorf("hub sync: %w", err)
