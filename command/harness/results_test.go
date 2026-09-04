@@ -1,7 +1,6 @@
 package harness
 
 import (
-	"os"
 	"strings"
 	"testing"
 
@@ -56,18 +55,20 @@ func TestPlanResults_FailsClosed(t *testing.T) {
 	if _, err := planResults(); err == nil || !strings.Contains(err.Error(), "results-license") {
 		t.Errorf("missing license must fail, got %v", err)
 	}
+	// Two services on one coordinate would publish to one tag.
+	configureResults(t, "CC0-1.0", map[string]string{"prod": "acme/app@1.0.0", "staging": "Acme/app@1.0.0"})
+	if _, err := planResults(); err == nil || !strings.Contains(err.Error(), "same coordinate") {
+		t.Errorf("duplicate targets must fail, got %v", err)
+	}
 }
 
 func TestForceGemaraOutput(t *testing.T) {
 	t.Cleanup(viper.Reset)
-	t.Setenv("PVTR_OUTPUT", "")
-	t.Setenv("PVTR_WRITE_DIRECTORY", "")
-	viper.Set("write-directory", "out")
 	if err := forceGemaraOutput(); err != nil {
 		t.Fatal(err)
 	}
-	if os.Getenv("PVTR_OUTPUT") != "gemara" || os.Getenv("PVTR_WRITE_DIRECTORY") != "out" {
-		t.Errorf("env not forwarded: PVTR_OUTPUT=%q PVTR_WRITE_DIRECTORY=%q", os.Getenv("PVTR_OUTPUT"), os.Getenv("PVTR_WRITE_DIRECTORY"))
+	if viper.GetString("output") != "gemara" {
+		t.Errorf("output = %q, want gemara", viper.GetString("output"))
 	}
 
 	viper.Set("output", "Gemara")
@@ -78,17 +79,22 @@ func TestForceGemaraOutput(t *testing.T) {
 	if err := forceGemaraOutput(); err == nil || !strings.Contains(err.Error(), `"json"`) {
 		t.Errorf("a conflicting explicit output must fail, got %v", err)
 	}
+	viper.Set("output", "gemara")
+	viper.Set("write", false)
+	if err := forceGemaraOutput(); err == nil || !strings.Contains(err.Error(), "write") {
+		t.Errorf("write: false leaves nothing to publish and must fail, got %v", err)
+	}
 }
 
 func TestPublish_SkipsIncompletePlugins(t *testing.T) {
 	t.Cleanup(viper.Reset)
-	viper.Set("binaries-path", t.TempDir())
-	plan := &resultsPlan{license: "CC0-1.0", targets: map[string]results.Target{"ok": {}, "failed": {}, "aborted": {}}}
+	plan := &resultsPlan{license: "CC0-1.0", targets: map[string]results.Target{"ok": {}, "failed": {}, "aborted": {}, "never": {}}}
 	plugins := []*PluginPkg{
-		{ServiceTarget: "ok", ExitCode: command.TestPass},
-		{ServiceTarget: "failed", ExitCode: command.TestFail},
-		{ServiceTarget: "aborted", ExitCode: command.Aborted},
-		{ServiceTarget: "unplanned", ExitCode: command.TestPass},
+		{ServiceTarget: "ok", Ran: true, ExitCode: command.TestPass},
+		{ServiceTarget: "failed", Ran: true, ExitCode: command.TestFail},
+		{ServiceTarget: "aborted", Ran: true, ExitCode: command.Aborted},
+		{ServiceTarget: "never"}, // zero ExitCode is TestPass; Ran is what counts
+		{ServiceTarget: "unplanned", Ran: true, ExitCode: command.TestPass},
 	}
 	var out bufWriter
 	// No gemara output exists for "ok", so the publisher fails there — after
@@ -97,7 +103,7 @@ func TestPublish_SkipsIncompletePlugins(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), `target "ok"`) {
 		t.Fatalf("expected the publisher to reach target ok, got %v", err)
 	}
-	if !strings.Contains(out.String(), "Not publishing aborted") || strings.Contains(out.String(), "Not publishing failed") || strings.Contains(out.String(), "unplanned") {
+	if !strings.Contains(out.String(), "Not publishing aborted") || !strings.Contains(out.String(), "Not publishing never") || strings.Contains(out.String(), "Not publishing failed") || strings.Contains(out.String(), "unplanned") {
 		t.Errorf("skip notices wrong:\n%s", out.String())
 	}
 }

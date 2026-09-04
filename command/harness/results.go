@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"os"
 	"strings"
 	"time"
 
@@ -12,7 +11,6 @@ import (
 
 	"github.com/privateerproj/privateer-sdk/command"
 	"github.com/privateerproj/privateer-sdk/config"
-	"github.com/privateerproj/privateer-sdk/internal/manifest"
 	"github.com/privateerproj/privateer-sdk/internal/oci"
 	"github.com/privateerproj/privateer-sdk/internal/results"
 )
@@ -28,7 +26,9 @@ type resultsPlan struct {
 // planResults resolves the per-target `target:` coordinates and the results
 // license from config for every target in scope. It fails closed: a target
 // without a parseable `target: <namespace>/<id>@<version>` cannot be
-// published, so the run does not start.
+// published, so the run does not start. Two targets naming the same
+// coordinate would publish to the same tag, the second silently re-pointing
+// it, so that is refused too.
 func planResults() (*resultsPlan, error) {
 	license, err := results.License(config.ResultsLicense())
 	if err != nil {
@@ -36,6 +36,7 @@ func planResults() (*resultsPlan, error) {
 	}
 	scope := config.TargetName()
 	plan := &resultsPlan{license: license, targets: map[string]results.Target{}, startedOn: time.Now().UTC()}
+	seen := map[results.Target]string{}
 	for name := range config.GetServices() {
 		if scope != "" && !strings.EqualFold(name, scope) {
 			continue
@@ -48,70 +49,61 @@ func planResults() (*resultsPlan, error) {
 		if err != nil {
 			return nil, fmt.Errorf("target %q: %w", name, err)
 		}
-		plan.targets[name] = t
+		if other, dup := seen[t]; dup {
+			return nil, fmt.Errorf("targets %q and %q both name %s; their results would publish to the same coordinate", other, name, raw)
+		}
+		seen[t], plan.targets[name] = name, t
 	}
 	return plan, nil
 }
 
 // forceGemaraOutput makes the run emit gemara-native logs, the only format
-// the publisher reads. Plugins receive no --output flag, so the override goes
-// through the PVTR_OUTPUT env var they inherit; write-directory is forwarded
-// the same way so host and plugin agree on where the logs land. An explicit
-// conflicting output (flag, env, or config) is an error rather than a silent
-// override.
+// the publisher reads: the host's output setting is overridden in-process,
+// and queueCmd forwards it to every plugin. An explicit conflicting output
+// (flag, env, or config) is an error rather than a silent override, as is
+// `write: false`, which would leave no logs to publish.
 func forceGemaraOutput() error {
 	if viper.IsSet("output") {
 		if out := strings.ToLower(strings.TrimSpace(viper.GetString("output"))); out != "gemara" {
 			return fmt.Errorf("--publish-results requires output: gemara, but output is set to %q", out)
 		}
 	}
-	if err := os.Setenv("PVTR_OUTPUT", "gemara"); err != nil {
-		return err
+	if viper.IsSet("write") && !viper.GetBool("write") {
+		return fmt.Errorf("--publish-results needs the results written, but write is false")
 	}
-	return os.Setenv("PVTR_WRITE_DIRECTORY", config.WriteDirectory())
+	viper.Set("output", "gemara")
+	return nil
 }
 
 // publish publishes the logs of every plugin that completed. A plugin
-// completed when it exited TestPass or TestFail: both leave a real log, and
-// failing results are still the honest record of the target. Plugins that
-// aborted, errored, or never ran are skipped with a notice. Publishing stops
-// at the first error; already-published bundles stay.
+// completed when it ran and exited TestPass or TestFail: both leave a real
+// log, and failing results are still the honest record of the target.
+// Plugins that aborted, errored, or never ran are skipped with a notice.
+// Publishing stops at the first error; already-published bundles stay.
 func (p *resultsPlan) publish(ctx context.Context, w io.Writer, plugins []*PluginPkg) error {
-	m, err := manifest.Load(config.GetBinariesPath())
-	if err != nil {
-		return fmt.Errorf("loading plugin manifest: %w", err)
-	}
 	var services []results.Service
 	for _, pkg := range plugins {
 		t, planned := p.targets[pkg.ServiceTarget]
 		if !planned {
 			continue
 		}
-		if pkg.ExitCode != command.TestPass && pkg.ExitCode != command.TestFail {
+		switch {
+		case !pkg.Ran:
+			_, _ = fmt.Fprintf(w, "Not publishing %s: plugin did not run\n", pkg.ServiceTarget)
+			continue
+		case pkg.ExitCode != command.TestPass && pkg.ExitCode != command.TestFail:
 			_, _ = fmt.Fprintf(w, "Not publishing %s: plugin did not complete (exit %d)\n", pkg.ServiceTarget, pkg.ExitCode)
 			continue
 		}
-		svc := results.Service{Name: pkg.ServiceTarget, Target: t}
-		if entry := installed(m, pkg); entry != nil {
-			svc.Coordinate, svc.IndexDigest = entry.Coordinate, entry.IndexDigest
-		}
-		services = append(services, svc)
+		services = append(services, results.Service{
+			Name: pkg.ServiceTarget, Target: t, Coordinate: pkg.Coordinate, IndexDigest: pkg.IndexDigest,
+		})
 	}
 	return results.Publish(ctx, w, results.Params{
 		HubURL:    oci.HubURL(),
 		WriteDir:  config.WriteDirectory(),
 		License:   p.license,
-		RunID:     results.RunID(p.startedOn),
 		StartedOn: p.startedOn,
 		Services:  services,
 	})
-}
-
-// installed is the manifest entry the plugin ran from, the same resolution
-// NewPluginPkg used to find its binary.
-func installed(m *manifest.Manifest, pkg *PluginPkg) *manifest.Plugin {
-	if pkg.Version != "" {
-		return m.FindVersion(pkg.Name, pkg.Version)
-	}
-	return m.Latest(pkg.Name)
 }

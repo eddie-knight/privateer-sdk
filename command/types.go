@@ -9,6 +9,7 @@ import (
 	hcplugin "github.com/hashicorp/go-plugin"
 	"github.com/spf13/viper"
 
+	"github.com/privateerproj/privateer-sdk/config"
 	"github.com/privateerproj/privateer-sdk/internal/manifest"
 )
 
@@ -37,11 +38,18 @@ type PluginPkg struct {
 	Command       *exec.Cmd
 	Result        string
 
+	// Coordinate and IndexDigest are the grc.store identity of the installed
+	// binary, from the manifest; both empty for a plugin not installed from
+	// grc.store.
+	Coordinate  string
+	IndexDigest string
+
 	Installable bool
 	Installed   bool
 	Requested   bool
 	Successful  bool
-	ExitCode    int // the plugin's exit code once it has run; TestPass before
+	Ran         bool // Start() returned; ExitCode is meaningful only when set
+	ExitCode    int  // the plugin's exit code once it has run (its zero value is TestPass, hence Ran)
 	Error       error
 }
 
@@ -65,15 +73,21 @@ func (p *PluginPkg) getBinary() (binaryPath string, err error) {
 	} else if entry = m.Latest(p.Name); entry == nil {
 		return "", fmt.Errorf("plugin %s is not installed in %s", p.Name, binariesPath)
 	}
+	p.Coordinate, p.IndexDigest = entry.Coordinate, entry.IndexDigest
 	return filepath.Join(binariesPath, entry.BinaryPath), nil
 }
 
+// queueCmd builds the plugin command line. Output format and directory are
+// forwarded explicitly so host and plugin agree on where results land and in
+// what format, whichever of flag, env, or config set them on the host.
 func (p *PluginPkg) queueCmd() {
 	cmd := exec.Command(p.Path)
 	cmd.Args = append(cmd.Args,
 		fmt.Sprintf("--config=%s", viper.GetString("config")),
 		fmt.Sprintf("--loglevel=%s", viper.GetString("loglevel")),
 		fmt.Sprintf("--service=%s", p.ServiceTarget),
+		fmt.Sprintf("--output=%s", viper.GetString("output")),
+		fmt.Sprintf("--write-directory=%s", config.WriteDirectory()),
 	)
 	p.Command = cmd
 }

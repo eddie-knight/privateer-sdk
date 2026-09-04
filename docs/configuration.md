@@ -83,17 +83,21 @@ signed OCI bundles, one bundle per log, after the run.
 Requirements, all checked before any plugin starts:
 
 - `output` must be `gemara` or unset; the run is forced to gemara output and
-  any other explicit value is an error.
+  any other explicit value is an error. `write` must not be `false`.
 - Every target in scope needs `target: <namespace>/<id>@<version>`: the
   grc.store target the results describe, owned by `<namespace>` (the target
   owner's org, never the plugin publisher), and the version of it that was
-  evaluated. `<namespace>` and `<id>` must be hub slugs (lowercase letters,
-  digits, `.`, single `-`).
+  evaluated. `<namespace>` and `<id>` must be hub slugs (lowercase letters
+  and digits, separated by single `.` or `-`), and `<version>` must make a
+  legal OCI tag (letters, digits, `_`, `.`, `-`; so no `+` build metadata).
+  No two targets may name the same coordinate.
 - `results-license` must be a valid SPDX expression.
-- Credentials: the hub bearer (`PVTR_TOKEN`, `pvtr login`, or the GitHub
-  Actions trusted-publishing token) and the Sigstore signing identity
-  (`SIGSTORE_ID_TOKEN`, or auto-detected in GitHub Actions). See
-  [ci-publishing.md](./ci-publishing.md).
+
+Credentials are resolved after the run, when the publish begins, so that a
+short-lived CI token is not stale by the time it is used: the hub bearer
+(`PVTR_TOKEN`, `pvtr login`, or the GitHub Actions trusted-publishing token)
+and the Sigstore signing identity (`SIGSTORE_ID_TOKEN`, or auto-detected in
+GitHub Actions). See [ci-publishing.md](./ci-publishing.md).
 
 Each log is published at `<namespace>/<id>-<catalog-id>` with tag and
 `metadata.version` both `<version>-<UTC run timestamp>` (e.g.
@@ -104,7 +108,9 @@ be hub slugs, or the publish fails before anything is pushed.
 
 Partial failure: a target is published when its plugin exited pass **or**
 fail (failing results are still the honest record); targets whose plugin
-aborted or errored are skipped with a notice. Publishing stops at the first
+aborted, errored, or never ran are skipped with a notice. Output left in the
+write directory by an earlier run is never published: a log file older than
+the run is an error. Publishing stops at the first
 publish error and the run exits with an internal error; bundles already
 published stay, since each is its own immutable coordinate.
 

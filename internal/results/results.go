@@ -1,9 +1,9 @@
 // Package results publishes a run's Gemara EvaluationLogs to grc.store as
 // signed OCI bundles (`pvtr run --publish-results`). It is the log
-// publisher; internal/publish is the plugin publisher and the two share no
-// code on purpose — the whole publish sequence (discover, mint, pack, push,
-// sign, provenance, sync) lives in grc-store-clientkit's bundle package and
-// is not re-implemented here.
+// publisher; internal/publish is the plugin publisher. The two share only
+// the hub credential step (auth.ConnectHub) — the whole publish sequence
+// (mint, pack, push, sign, provenance, sync) lives in grc-store-clientkit's
+// bundle package and is not re-implemented here.
 //
 // Each log becomes one bundle at <namespace>/<target-id>-<catalog-id>:<tag>,
 // where namespace/id/version come from the target's `target:` config key and
@@ -14,8 +14,6 @@ package results
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -31,7 +29,9 @@ import (
 	"github.com/gemaraproj/grc-store-clientkit/keyless"
 	"github.com/gemaraproj/grc-store-clientkit/provenance"
 	"github.com/goccy/go-yaml"
+	"github.com/opencontainers/go-digest"
 	"github.com/revanite-io/grc-store-protocol/spdx"
+	"oras.land/oras-go/v2/registry"
 
 	"github.com/privateerproj/privateer-sdk/internal/auth"
 	"github.com/privateerproj/privateer-sdk/internal/oci"
@@ -46,9 +46,15 @@ type Target struct {
 	Version   string
 }
 
+// Tag is the OCI tag every log of this target is published under in the
+// run identified by runID.
+func (t Target) Tag(runID string) string { return t.Version + "-" + runID }
+
 // ParseTarget parses "<namespace>/<id>@<version>". All three parts are
 // required; namespace and id must already be hub slugs (see slugRe) so the
-// repository this code composes equals what the hub derives from metadata.id.
+// repository this code composes equals what the hub derives from metadata.id,
+// and version must make a legal OCI tag. Everything the tag and repository
+// are composed from is validated here, before any plugin runs.
 func ParseTarget(raw string) (Target, error) {
 	coord, version, ok := strings.Cut(strings.TrimSpace(raw), "@")
 	ns, id, ok2 := oci.SplitCoordinate(coord)
@@ -56,27 +62,33 @@ func ParseTarget(raw string) (Target, error) {
 		return Target{}, fmt.Errorf("want <namespace>/<id>@<version>, got %q", raw)
 	}
 	t := Target{Namespace: strings.ToLower(ns), ID: strings.ToLower(id), Version: version}
-	for what, v := range map[string]string{"namespace": t.Namespace, "id": t.ID} {
-		if !slugRe.MatchString(v) {
-			return Target{}, fmt.Errorf("target %s %q is not a hub slug (lowercase letters, digits, '.', single '-')", what, v)
+	for _, part := range []struct{ what, v string }{{"namespace", t.Namespace}, {"id", t.ID}} {
+		if !slugRe.MatchString(part.v) {
+			return Target{}, fmt.Errorf("target %s %q is not a hub slug (%s)", part.what, part.v, slugHint)
 		}
+	}
+	// Every run id has the same width and tag-legal characters, so a
+	// placeholder validates the tag every real run will compose.
+	if err := (registry.Reference{Reference: t.Tag(RunID(time.Time{}))}).ValidateReferenceAsTag(); err != nil {
+		return Target{}, fmt.Errorf("target version %q does not make a legal OCI tag: %w", version, err)
 	}
 	return t, nil
 }
 
 // slugRe is the subset of inputs on which the hub's slug function is the
 // identity (after lowercasing): no character runs to collapse, no edge
-// hyphens to trim. Restricting ids to it lets the repository be composed as
-// <id>-<catalog> with the guarantee slugify(metadata.id) == repository id,
-// without copying the hub's implementation.
+// separators to trim. It is also a strict subset of the OCI repository
+// path-component grammar, so a passing id can never fail at the registry.
+// Restricting ids to it lets the repository be composed as <id>-<catalog>
+// with the guarantee slugify(metadata.id) == repository id, without copying
+// the hub's implementation.
 //
 // ponytail: neither clientkit nor protocol exports the hub slug yet; adopt
 // it when it lands and drop this fail-closed check so arbitrary catalog ids
 // publish.
-var slugRe = regexp.MustCompile(`^[a-z0-9.]+(-[a-z0-9.]+)*$`)
+var slugRe = regexp.MustCompile(`^[a-z0-9]+([.-][a-z0-9]+)*$`)
 
-// tagRe is the OCI distribution tag grammar.
-var tagRe = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9._-]{0,127}$`)
+const slugHint = "lowercase letters and digits, separated by single '.' or '-'"
 
 // License canonicalizes the results-license config value; it is required
 // because the hub rejects unlicensed bundles at sync (ADR-0037).
@@ -109,9 +121,8 @@ type Service struct {
 type Params struct {
 	HubURL    string
 	WriteDir  string
-	License   string // canonical SPDX, from License
-	RunID     string
-	StartedOn time.Time
+	License   string    // canonical SPDX, from License
+	StartedOn time.Time // when the run began; RunID is derived from it
 	Services  []Service
 
 	// Test seams: nil selects the real clientkit sequence.
@@ -146,9 +157,10 @@ func Publish(ctx context.Context, w io.Writer, p Params) error {
 	if _, err := License(p.License); err != nil {
 		return err
 	}
+	runID := RunID(p.StartedOn)
 	var logs []stamped
 	for _, svc := range p.Services {
-		s, err := loadService(p, svc)
+		s, err := loadService(p, svc, runID)
 		if err != nil {
 			return fmt.Errorf("target %q: %w", svc.Name, err)
 		}
@@ -181,7 +193,7 @@ func Publish(ctx context.Context, w io.Writer, p Params) error {
 			ArtifactType:   gemara.EvaluationLogArtifact.String(),
 			ArtifactID:     s.log.Metadata.Id,
 			ArtifactName:   filename,
-			ArtifactDigest: digest(body),
+			ArtifactDigest: digest.FromBytes(body).String(),
 			SourceFiles:    map[string]string{s.source: s.sourceHash},
 			Registry:       c.registry,
 			Repository:     s.repository,
@@ -191,7 +203,7 @@ func Publish(ctx context.Context, w io.Writer, p Params) error {
 				IndexDigest:   s.svc.IndexDigest,
 				TargetID:      s.svc.Target.ID,
 				TargetVersion: s.svc.Target.Version,
-				RunID:         p.RunID,
+				RunID:         runID,
 			},
 		})
 		in := bundle.Input{
@@ -218,9 +230,19 @@ func Publish(ctx context.Context, w io.Writer, p Params) error {
 }
 
 // loadService reads the service's gemara output (a YAML list of logs, one
-// per catalog) and stamps each log with its publish identity.
-func loadService(p Params, svc Service) ([]stamped, error) {
+// per catalog) and stamps each log with its publish identity. Output that
+// predates the run is a leftover from an earlier one, not this run's result,
+// and is refused.
+func loadService(p Params, svc Service, runID string) ([]stamped, error) {
 	source := filepath.Join(p.WriteDir, svc.Name, svc.Name+".yaml")
+	info, err := os.Stat(source)
+	if err != nil {
+		return nil, fmt.Errorf("reading gemara output: %w", err)
+	}
+	// Truncate: some filesystems keep whole-second mtimes.
+	if info.ModTime().Before(p.StartedOn.Truncate(time.Second)) {
+		return nil, fmt.Errorf("%s was written %s, before this run started; the plugin left no new output", source, info.ModTime().UTC().Format(time.RFC3339))
+	}
 	raw, err := os.ReadFile(source)
 	if err != nil {
 		return nil, fmt.Errorf("reading gemara output: %w", err)
@@ -232,10 +254,8 @@ func loadService(p Params, svc Service) ([]stamped, error) {
 	if len(logs) == 0 {
 		return nil, fmt.Errorf("%s holds no evaluation logs", source)
 	}
-	tag := svc.Target.Version + "-" + p.RunID
-	if !tagRe.MatchString(tag) {
-		return nil, fmt.Errorf("version %q makes tag %q, which is not a valid OCI tag", svc.Target.Version, tag)
-	}
+	tag := svc.Target.Tag(runID)
+	sourceHash := digest.FromBytes(raw).String()
 	out := make([]stamped, 0, len(logs))
 	for _, log := range logs {
 		// The plugin stamps metadata.id as <service>_<catalog>; the catalog
@@ -245,7 +265,7 @@ func loadService(p Params, svc Service) ([]stamped, error) {
 			return nil, fmt.Errorf("log id %q is not <%s>_<catalog-id>", log.Metadata.Id, svc.Name)
 		}
 		if !slugRe.MatchString(strings.ToLower(catalog)) {
-			return nil, fmt.Errorf("catalog id %q is not a hub slug (lowercase letters, digits, '.', single '-')", catalog)
+			return nil, fmt.Errorf("catalog id %q is not a hub slug (%s)", catalog, slugHint)
 		}
 		log.Metadata.Id = svc.Target.ID + "_" + catalog
 		log.Metadata.Version = tag
@@ -255,7 +275,7 @@ func loadService(p Params, svc Service) ([]stamped, error) {
 		out = append(out, stamped{
 			svc:        svc,
 			source:     source,
-			sourceHash: digest(raw),
+			sourceHash: sourceHash,
 			log:        log,
 			repository: svc.Target.Namespace + "/" + svc.Target.ID + "-" + strings.ToLower(catalog),
 			tag:        tag,
@@ -265,36 +285,16 @@ func loadService(p Params, svc Service) ([]stamped, error) {
 }
 
 // resolveCreds resolves the two independent identities a publish needs: the
-// hub bearer (PVTR_TOKEN / `pvtr login`, else the GitHub Actions trusted-
-// publishing token) and the public-good Fulcio signing identity.
+// hub bearer (the sequence shared with `pvtr publish`, see auth.ConnectHub)
+// and the public-good Fulcio signing identity.
 func resolveCreds(ctx context.Context, w io.Writer, hubURL string) (creds, error) {
-	disco, err := hub.Discover(ctx, hubURL)
+	h, err := auth.ConnectHub(ctx, hubURL)
 	if err != nil {
-		return creds{}, fmt.Errorf("hub discovery: %w", err)
-	}
-	host, _, err := hub.Registry(disco)
-	if err != nil {
-		return creds{}, fmt.Errorf("resolving registry host: %w", err)
-	}
-	bearer, err := auth.BearerToken(ctx, disco.OIDCIssuer, disco.OIDCCLIClientID)
-	if err != nil {
-		tok, ok, cerr := hub.CIBearer(ctx, hubURL, disco)
-		switch {
-		case !ok:
-			return creds{}, fmt.Errorf("authentication required to publish results: %w", err)
-		case cerr != nil:
-			return creds{}, fmt.Errorf("GitHub Actions hub token: %w", cerr)
-		}
-		bearer = tok
+		return creds{}, err
 	}
 	idTok, err := keyless.Identity(ctx, keyless.PublicGoodAudience, w)
 	if err != nil {
 		return creds{}, fmt.Errorf("acquiring signing identity (public-good Fulcio; distinct from `pvtr login`): %w", err)
 	}
-	return creds{bearer: bearer, registry: host, signer: &keyless.Signer{IDToken: idTok}}, nil
-}
-
-func digest(b []byte) string {
-	sum := sha256.Sum256(b)
-	return "sha256:" + hex.EncodeToString(sum[:])
+	return creds{bearer: h.Bearer, registry: h.Registry, signer: &keyless.Signer{IDToken: idTok}}, nil
 }

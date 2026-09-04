@@ -14,6 +14,8 @@ import (
 	"os"
 
 	clientauth "github.com/gemaraproj/grc-store-clientkit/auth"
+	"github.com/gemaraproj/grc-store-clientkit/hub"
+	"github.com/revanite-io/grc-store-protocol/discovery"
 )
 
 // pvtrApp identifies pvtr to grc-store-clientkit. It selects the credential
@@ -108,4 +110,40 @@ func BearerToken(ctx context.Context, issuer, clientID string) (string, error) {
 		in.Store = store
 	}
 	return clientauth.Resolve(ctx, in)
+}
+
+// Hub is a discovered hub plus the bearer that authenticates writes to it.
+type Hub struct {
+	Discovery *discovery.Document
+	Registry  string // registry host
+	PlainHTTP bool
+	Bearer    string
+}
+
+// ConnectHub discovers hubURL and resolves the write bearer, the one
+// credential sequence `pvtr publish` and `pvtr run --publish-results` share
+// so their auth policies cannot drift: PVTR_TOKEN or the `pvtr login` store
+// first (BearerToken), else the GitHub Actions trusted-publishing token when
+// running there. This is not the signing identity; see keyless.Identity.
+func ConnectHub(ctx context.Context, hubURL string) (*Hub, error) {
+	disco, err := hub.Discover(ctx, hubURL)
+	if err != nil {
+		return nil, fmt.Errorf("hub discovery: %w", err)
+	}
+	host, plainHTTP, err := hub.Registry(disco)
+	if err != nil {
+		return nil, fmt.Errorf("resolving registry host: %w", err)
+	}
+	bearer, err := BearerToken(ctx, disco.OIDCIssuer, disco.OIDCCLIClientID)
+	if err != nil {
+		tok, ok, cerr := hub.CIBearer(ctx, hubURL, disco)
+		switch {
+		case !ok:
+			return nil, fmt.Errorf("authentication required to publish to %s: %w", hubURL, err)
+		case cerr != nil:
+			return nil, fmt.Errorf("GitHub Actions hub token: %w", cerr)
+		}
+		bearer = tok
+	}
+	return &Hub{Discovery: disco, Registry: host, PlainHTTP: plainHTTP, Bearer: bearer}, nil
 }

@@ -170,25 +170,16 @@ func Publish(ctx context.Context, w io.Writer, p Params) error {
 	// 7. Real publish: discover the hub's registry + OIDC coordinates, get an
 	//    authenticated bearer (login store or PVTR_TOKEN), mint a push-scoped
 	//    registry token, authenticated push, then sync.
-	hubURL := oci.HubURL()
-	disco, err := hub.Discover(ctx, hubURL)
-	if err != nil {
-		return fmt.Errorf("hub discovery: %w", err)
-	}
-	host, plainHTTP, err := hub.Registry(disco)
-	if err != nil {
-		return fmt.Errorf("resolving registry host: %w", err)
-	}
 	ns, pid, ok := oci.SplitCoordinate(coordinate)
 	if !ok {
 		return fmt.Errorf("invalid coordinate %q: want <namespace>/<plugin_id>", coordinate)
 	}
-
-	bearer, err := auth.BearerToken(ctx, disco.OIDCIssuer, disco.OIDCCLIClientID)
+	hubURL := oci.HubURL()
+	h, err := auth.ConnectHub(ctx, hubURL)
 	if err != nil {
-		return fmt.Errorf("authentication required to publish: %w", err)
+		return err
 	}
-	client := hub.New(hubURL, bearer)
+	client := hub.New(hubURL, h.Bearer)
 	regToken, err := client.RegistryToken(ctx, hub.PluginRepository(ns, pid), []string{"pull", "push"})
 	if err != nil {
 		if errors.Is(err, hub.ErrUnauthorized) {
@@ -203,16 +194,16 @@ func Publish(ctx context.Context, w io.Writer, p Params) error {
 	if !regToken.GrantsPush() {
 		return fmt.Errorf("publishing to %s/%s/%s requires ownership of namespace %q — create or claim it first (e.g. at %s/%s, or POST %s/v1/orgs), then re-publish",
 			ns, oci.ReservedPluginSegment, pid,
-			ns, uiBase(disco.UIURL, disco.HubURL), ns, hubURL)
+			ns, uiBase(h.Discovery.UIURL, h.Discovery.HubURL), ns, hubURL)
 	}
 
 	pushOpts := oci.PushOptions{
-		RegistryHost:  host,
-		PlainHTTP:     plainHTTP,
+		RegistryHost:  h.Registry,
+		PlainHTTP:     h.PlainHTTP,
 		RegistryToken: regToken.Token,
 	}
 
-	_, _ = fmt.Fprintf(w, "Pushing to %s (hub %s)\n", host, hubURL)
+	_, _ = fmt.Fprintf(w, "Pushing to %s (hub %s)\n", h.Registry, hubURL)
 	digest, err := oci.Push(ctx, idx, pushOpts)
 	if err != nil {
 		return fmt.Errorf("pushing index: %w", err)

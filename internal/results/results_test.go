@@ -51,7 +51,7 @@ type call struct {
 func stubbed(dir string, services ...Service) (Params, *[]call) {
 	calls := &[]call{}
 	return Params{
-		HubURL: "https://hub.example", WriteDir: dir, License: "CC0-1.0", RunID: "20260904T101500Z",
+		HubURL: "https://hub.example", WriteDir: dir, License: "CC0-1.0",
 		StartedOn: time.Date(2026, 9, 4, 10, 15, 0, 0, time.UTC), Services: services,
 		resolveCreds: func(context.Context, io.Writer, string) (creds, error) {
 			return creds{bearer: "b", registry: "reg.example", signer: &keyless.Signer{IDToken: "tok"}}, nil
@@ -72,7 +72,11 @@ func TestParseTarget(t *testing.T) {
 	if err != nil || good != (Target{Namespace: "acme", ID: "my-repo", Version: "1.2.3-rc1"}) {
 		t.Fatalf("got %+v, %v", good, err)
 	}
-	for _, bad := range []string{"", "acme/my-repo", "acme/my-repo@", "my-repo@1.0", "acme/a/b@1.0", "acme/my repo@1.0", "acme/-lead@1.0", "acme/dou--ble@1.0"} {
+	for _, bad := range []string{"", "acme/my-repo", "acme/my-repo@", "my-repo@1.0", "acme/a/b@1.0", "acme/my repo@1.0", "acme/-lead@1.0", "acme/dou--ble@1.0",
+		// OCI path components: no edge or doubled dots, no dot next to a hyphen.
+		"acme/repo.@1.0", "acme/.repo@1.0", "acme/a..b@1.0", "acme/repo.-x@1.0",
+		// The version must make a legal OCI tag.
+		"acme/repo@1.2.0+build.7", "acme/repo@1.0/0", "acme/repo@1.0@1", "acme/repo@" + strings.Repeat("9", 112)} {
 		if _, err := ParseTarget(bad); err == nil {
 			t.Errorf("ParseTarget(%q) should fail", bad)
 		}
@@ -157,10 +161,13 @@ func TestPublish_FailsClosedBeforeNetwork(t *testing.T) {
 			_ = os.WriteFile(filepath.Join(dir, "svc", "svc.yaml"), []byte(strings.ReplaceAll(string(raw), "svc_cat", "other_cat")), 0o644)
 			return p
 		},
-		"version not tag-legal": func(dir string) Params {
+		"output left over from an earlier run": func(dir string) Params {
 			writeLogs(t, dir, "svc", "cat")
 			p, _ := stubbed(dir, acme("svc"))
-			p.Services[0].Target.Version = "1.0/0"
+			old := p.StartedOn.Add(-time.Hour)
+			if err := os.Chtimes(filepath.Join(dir, "svc", "svc.yaml"), old, old); err != nil {
+				t.Fatal(err)
+			}
 			return p
 		},
 	}
