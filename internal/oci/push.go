@@ -135,8 +135,9 @@ func newPluginRepository(opts PushOptions, coordinate string) (*remote.Repositor
 }
 
 // pluginRepoPath returns the registry repository path "<namespace>/plugins/<id>"
-// the hub uses for a plugin. The hub compares this byte-for-byte, so every caller
-// (token mint, push, sync) must build it through here.
+// the hub uses for a plugin. It is the push side of that path; the token scope and
+// the sync body are built by clientkit's hub.PluginRepository. The hub compares the
+// two byte-for-byte, so TestPluginRepoPath_MatchesClientkit pins them equal.
 func pluginRepoPath(ns, id string) string {
 	return ns + "/" + ReservedPluginSegment + "/" + id
 }
