@@ -29,21 +29,6 @@ const (
 	NoTests       = shared.NoTests
 )
 
-// Across multi-plugin runs the most severe outcome wins.
-var exitSeverity = map[int]int{
-	TestPass:      0,
-	TestFail:      1,
-	BadUsage:      2,
-	InternalError: 3,
-}
-
-func mergeExitCode(prev, next int) int {
-	if exitSeverity[next] > exitSeverity[prev] {
-		return next
-	}
-	return prev
-}
-
 // planRun decides, without executing anything, what Run should do with the
 // resolved plugin list:
 //   - toRun is the requested-and-installed plugins to execute, in input order.
@@ -51,7 +36,8 @@ func mergeExitCode(prev, next int) int {
 //     ignored for both execution and validation, so a shared config with a
 //     broken unrelated entry cannot block a targeted run.
 //   - earlyExit is non-zero when Run must return immediately without executing:
-//     NoTests when the plugin list is empty, BadUsage when the target names no
+//     NoTests when no plugin is requested (an empty, missing, or unreadable
+//     config included) and no target is given, BadUsage when the target names no
 //     configured service or a requested plugin is not installed (errMsg is the
 //     ready-to-log explanation).
 //
@@ -68,6 +54,11 @@ func planRun(plugins []*PluginPkg, target string) (toRun []*PluginPkg, earlyExit
 		if pluginPkg.Requested {
 			requested = append(requested, pluginPkg)
 		}
+	}
+
+	// A run that evaluates nothing must not exit 0 as if every control passed.
+	if len(requested) == 0 && target == "" {
+		return nil, NoTests, ""
 	}
 
 	if target != "" {
@@ -155,7 +146,7 @@ func Run(logger hclog.Logger, getPlugins func() []*PluginPkg) (exitCode int) {
 	toRun, earlyExit, errMsg := planRun(getPlugins(), config.TargetName())
 	switch earlyExit {
 	case NoTests:
-		logger.Error(fmt.Sprintf("no plugins were requested in config: %s", config.GetBinariesPath()))
+		logger.Error(fmt.Sprintf("no plugins were requested in config %q: define at least one target with a plugin under 'targets'", viper.ConfigFileUsed()))
 		return NoTests
 	case BadUsage:
 		logger.Error(errMsg)
@@ -198,7 +189,7 @@ func runSequential(toRun []*PluginPkg, run runFunc) (exitCode int) {
 		if fatal {
 			return InternalError
 		}
-		exitCode = mergeExitCode(exitCode, code)
+		exitCode = shared.MergeExitCode(exitCode, code)
 	}
 	return exitCode
 }
@@ -227,7 +218,7 @@ func runParallel(toRun []*PluginPkg, limit int, run runFunc) (exitCode int) {
 	}
 	_ = g.Wait() // run never returns an error; Wait is only the barrier
 	for _, code := range codes {
-		exitCode = mergeExitCode(exitCode, code)
+		exitCode = shared.MergeExitCode(exitCode, code)
 	}
 	return exitCode
 }

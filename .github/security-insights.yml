@@ -20,7 +20,7 @@ repository:
       social: https://bsky.app/profile/eddieknight.dev
       primary: true
     - name: Jason Meridth
-      affiliation: Chainguard
+      affiliation: Revanite
       social: https://github.com/jmeridth
       primary: false
   documentation:
@@ -62,10 +62,55 @@ repository:
           adhoc:
             name: Scheduled SCA Scan Results
             predicate-uri: https://docs.github.com/en/graphql/reference/objects#repositoryvulnerabilityalert
-            location: https://github.com/privateerproj/privateer-sdk/security/dependabot
+            location: https://github.com/privateerproj/privateer-sdk/blob/main/.github/dependabot.yml
             comment: |
-              The results of the scheduled SCA scan are available in the Dependabot tab of the Security Insights page.
+              Dependabot is configured in .github/dependabot.yml. Its alerts are visible to maintainers in the repository's Security tab.
         integration:
           adhoc: true
           ci: false
           release: false
+      - name: GitHub Secret Scanning
+        type: secret
+        rulesets:
+          - default
+        comment: |
+          GitHub secret scanning and push protection are enabled in the
+          repository's security settings (OSPS-BR-07.01). Alerts are visible
+          to maintainers only.
+        results:
+          ci:
+            name: Secret scanning alerts
+            predicate-uri: https://docs.github.com/en/code-security/secret-scanning/about-secret-scanning
+            location: https://github.com/privateerproj/privateer-sdk/security/secret-scanning
+            comment: |
+              Alerts are visible to maintainers only.
+        integration:
+          adhoc: false
+          ci: true
+          release: false
+      - name: OSPS Baseline Scanner
+        type: other
+        rulesets:
+          - osps-baseline-2026-08
+        integration:
+          adhoc: false
+          ci: true
+          release: false
+        results:
+          ci:
+            name: OSPS Baseline evaluation
+            predicate-uri: https://github.com/revanite-io/osps-baseline-action
+            location: https://github.com/privateerproj/privateer-sdk/actions/workflows/osps-security-assessment.yml
+      - name: OSPS Baseline Scanner (grc.store)
+        type: other
+        rulesets:
+          - osps-baseline-2026-08
+        integration:
+          adhoc: false
+          ci: true
+          release: false
+        results:
+          ci:
+            name: OSPS Baseline evaluation published to grc.store
+            predicate-uri: https://github.com/revanite-io/pvtr-publish-results
+            location: https://grc.store/targets/privateer/privateer-sdk

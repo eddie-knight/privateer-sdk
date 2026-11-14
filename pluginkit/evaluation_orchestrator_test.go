@@ -3,6 +3,7 @@ package pluginkit
 import (
 	"embed"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -927,6 +928,38 @@ func TestEvaluationOrchestrator_WriteResults_IncludePayload(t *testing.T) {
 		}
 	})
 
+	// The plugin scaffold puts *config.Config in the payload, and config vars
+	// carry credentials such as a GitHub token. Results files get shared and
+	// published, so the vars must never reach them.
+	for _, output := range []string{"yaml", "json"} {
+		t.Run("config vars are never written with the payload as "+output, func(t *testing.T) {
+			const secret = "SECRET-PROBE-xyz"
+			payload := struct {
+				Config *config.Config
+				Owner  string
+			}{
+				Config: &config.Config{
+					ServiceName: "test-service",
+					Vars:        map[string]any{"token": secret, "ai_api_key": secret},
+				},
+				Owner: "acme",
+			}
+
+			resultPath := writeResultsFixture(t, output, true, payload)
+
+			data, err := os.ReadFile(resultPath)
+			if err != nil {
+				t.Fatalf("read output: %v", err)
+			}
+			if strings.Contains(string(data), secret) {
+				t.Errorf("config vars leaked into %s results:\n%s", output, data)
+			}
+			if !strings.Contains(string(data), "acme") {
+				t.Errorf("the rest of the payload should still be written, got:\n%s", data)
+			}
+		})
+	}
+
 	t.Run("orchestrator Payload is restored after WriteResults", func(t *testing.T) {
 		// Verifies the snapshot-and-restore: calling WriteResults must not
 		// permanently mutate v.Payload, so repeated calls and post-write
@@ -986,5 +1019,165 @@ func TestMobilize_SuiteThatCannotRunFailsTheRun(t *testing.T) {
 	}
 	if got := ExitCodeFor(orchestrator, err); got != shared.TestFail {
 		t.Errorf("exit code = %d, want TestFail (%d)", got, shared.TestFail)
+	}
+}
+
+func TestLoadPayload_DeduplicatesOrchestratorAndSuiteLoader(t *testing.T) {
+	callCount := 0
+	sharedLoader := func(cfg *config.Config) (any, error) {
+		callCount++
+		return "shared-data", nil
+	}
+
+	orchestrator := &EvaluationOrchestrator{
+		possibleSuites: []*EvaluationSuite{
+			{CatalogId: "suite-1"},
+			{CatalogId: "suite-2", loader: sharedLoader},
+		},
+	}
+	orchestrator.AddLoader(sharedLoader)
+
+	if err := orchestrator.loadPayload(); err != nil {
+		t.Fatalf("unexpected error from loadPayload: %v", err)
+	}
+
+	if callCount != 1 {
+		t.Errorf("expected sharedLoader to be called once, got %d", callCount)
+	}
+	if orchestrator.Payload != "shared-data" {
+		t.Errorf("expected orchestrator.Payload to be 'shared-data', got %v", orchestrator.Payload)
+	}
+	if orchestrator.possibleSuites[0].payload != "shared-data" {
+		t.Errorf("expected suite-1 payload to be 'shared-data', got %v", orchestrator.possibleSuites[0].payload)
+	}
+	if orchestrator.possibleSuites[1].payload != "shared-data" {
+		t.Errorf("expected suite-2 payload to be 'shared-data', got %v", orchestrator.possibleSuites[1].payload)
+	}
+}
+
+func TestLoadPayload_DeduplicatesAcrossSuites(t *testing.T) {
+	callCount := 0
+	customLoader := func(cfg *config.Config) (any, error) {
+		callCount++
+		return "custom-data", nil
+	}
+
+	orchestrator := &EvaluationOrchestrator{
+		possibleSuites: []*EvaluationSuite{
+			{CatalogId: "suite-1", loader: customLoader},
+			{CatalogId: "suite-2", loader: customLoader},
+			{CatalogId: "suite-3", loader: customLoader},
+		},
+	}
+
+	if err := orchestrator.loadPayload(); err != nil {
+		t.Fatalf("unexpected error from loadPayload: %v", err)
+	}
+
+	if callCount != 1 {
+		t.Errorf("expected customLoader to be called once across 3 suites, got %d", callCount)
+	}
+	for i, suite := range orchestrator.possibleSuites {
+		if suite.payload != "custom-data" {
+			t.Errorf("expected suite %d payload to be 'custom-data', got %v", i+1, suite.payload)
+		}
+	}
+}
+
+func TestLoadPayload_DistinctLoadersExecutedIndependently(t *testing.T) {
+	countA := 0
+	loaderA := func(cfg *config.Config) (any, error) {
+		countA++
+		return "payload-A", nil
+	}
+	countB := 0
+	loaderB := func(cfg *config.Config) (any, error) {
+		countB++
+		return "payload-B", nil
+	}
+
+	orchestrator := &EvaluationOrchestrator{
+		possibleSuites: []*EvaluationSuite{
+			{CatalogId: "suite-A1", loader: loaderA},
+			{CatalogId: "suite-A2", loader: loaderA},
+			{CatalogId: "suite-B1", loader: loaderB},
+		},
+	}
+
+	if err := orchestrator.loadPayload(); err != nil {
+		t.Fatalf("unexpected error from loadPayload: %v", err)
+	}
+
+	if countA != 1 {
+		t.Errorf("expected loaderA to be called 1 time, got %d", countA)
+	}
+	if countB != 1 {
+		t.Errorf("expected loaderB to be called 1 time, got %d", countB)
+	}
+	if orchestrator.possibleSuites[0].payload != "payload-A" || orchestrator.possibleSuites[1].payload != "payload-A" {
+		t.Errorf("expected suite-A1 and suite-A2 to have 'payload-A'")
+	}
+	if orchestrator.possibleSuites[2].payload != "payload-B" {
+		t.Errorf("expected suite-B1 to have 'payload-B'")
+	}
+}
+
+func TestLoadPayload_ErrorPropagates(t *testing.T) {
+	expectedErr := errors.New("loader failed")
+	failingLoader := func(cfg *config.Config) (any, error) {
+		return nil, expectedErr
+	}
+
+	t.Run("orchestrator loader error", func(t *testing.T) {
+		orchestrator := &EvaluationOrchestrator{}
+		orchestrator.AddLoader(failingLoader)
+		err := orchestrator.loadPayload()
+		if !errors.Is(err, expectedErr) {
+			t.Errorf("expected error %v, got %v", expectedErr, err)
+		}
+	})
+
+	t.Run("suite loader error", func(t *testing.T) {
+		orchestrator := &EvaluationOrchestrator{
+			possibleSuites: []*EvaluationSuite{
+				{CatalogId: "suite-1", loader: failingLoader},
+			},
+		}
+		err := orchestrator.loadPayload()
+		if !errors.Is(err, expectedErr) {
+			t.Errorf("expected error %v, got %v", expectedErr, err)
+		}
+	})
+}
+
+func TestBenchmark_APICallReporter_DeduplicatedPayloadDoesNotDoubleCount(t *testing.T) {
+	callCount := 0
+	countingLoader := func(_ *config.Config) (any, error) {
+		callCount++
+		return &countingPayload{calls: 7}, nil
+	}
+
+	orchestrator := &EvaluationOrchestrator{
+		possibleSuites: []*EvaluationSuite{
+			{CatalogId: "suite-1", loader: countingLoader},
+			{CatalogId: "suite-2", loader: countingLoader},
+		},
+	}
+	orchestrator.AddLoader(countingLoader)
+
+	if err := orchestrator.loadPayload(); err != nil {
+		t.Fatalf("loadPayload failed: %v", err)
+	}
+
+	if callCount != 1 {
+		t.Fatalf("expected countingLoader to be called once, got %d", callCount)
+	}
+
+	calls, ok := orchestrator.apiCallsReported()
+	if !ok {
+		t.Fatal("expected apiCallsReported to return true")
+	}
+	if calls != 7 {
+		t.Errorf("expected total api calls to be 7, got %d (double counting occurred)", calls)
 	}
 }

@@ -5,6 +5,7 @@ on:
   pull_request_target:
     types: [closed]
     branches: [main]
+permissions: {}
 jobs:
   release:
     permissions:
@@ -14,7 +15,7 @@ jobs:
       attestations: write   # release_goreleaser, release_image: build provenance
       packages: write       # release_image: push container image (gated, but validated)
       discussions: write    # release_discussion: announcement (gated, defensive)
-    uses: github-community-projects/ospo-reusable-workflows/.github/workflows/release.yaml@a48c75fafbf2513929ff2ce06dfaa38247ddc50b # v2.1.0
+    uses: github-community-projects/ospo-reusable-workflows/.github/workflows/release.yaml@ee8277bd76ef808b3a6e0bdd1f5a46a520a12c5d # v2.3.1
     with:
       publish: true
       release-config-name: release-drafter.yml
